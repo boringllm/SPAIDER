@@ -258,16 +258,27 @@ Every tool declares a **category** that drives the tool-approval policy. There a
 
 | Category | Tools |
 |---|---|
-| **recon** | `nmap_scan`, `dns_enum`, `whois_lookup`, `whatweb_scan` |
-| **web** | `nikto_scan`, `gobuster_dir`, `ffuf_fuzz`, `sqlmap_test`, `wpscan_scan` |
+| **recon** | `nmap_scan`, `dns_enum`, `whois_lookup`, `whatweb_scan`, `http_probe` (httpx), `web_crawl` (gospider), `waf_detect` (wafw00f) |
+| **web / API** | `nikto_scan`, `gobuster_dir`, `ffuf_fuzz`, `sqlmap_test`, `wpscan_scan`, `param_discover` (arjun — hidden params) |
 | **enum / network** | `enum4linux`, `smb_list_shares`, `snmp_enum`, `ssl_scan` |
-| **exploit** | `searchsploit`, `nuclei_scan`, `metasploit_run`, `run_poc` (write + run a PoC in Kali) |
+| **exploit** | `searchsploit`, `nuclei_scan`, `metasploit_run`, `commix_test` (command injection), `run_poc` (write + run a PoC in Kali) |
 | **bruteforce** | `hydra_bruteforce` |
 | **shell / filesystem** | `run_command`, `write_file`, `read_file` (all on the Kali host) |
+
+The **API/web set** (`http_probe`, `web_crawl`, `param_discover`, `commix_test`, `waf_detect`)
+covers probing, crawling/endpoint discovery, hidden-parameter discovery, command-injection testing,
+and WAF fingerprinting — the surface-mapping and attack steps a modern web/API engagement needs.
 
 Each Kali tool has a detailed parameter schema and maps the **intensity** knob to real flags. Add
 your own in minutes by decorating an async handler (see [`kali_server/README.md`](kali_server/README.md)) —
 it appears to Spider automatically with its category and availability.
+
+**Output filtering (less noise for the agents).** Every offensive tool's output is statically
+filtered down to its notable findings (open ports, found paths, vulns, creds, records, params…)
+before an agent sees it, so context isn't wasted on banners, progress bars and logs. An agent can
+ask for the complete output of any call with `raw=true`, and the admin can disable filtering
+globally in **Settings → Kali → filter tool output** (which returns every tool's raw output
+unchanged). See [`kali_server/README.md`](kali_server/README.md) for how each tool is filtered.
 
 ---
 

@@ -28,6 +28,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         nmap dnsrecon whois whatweb \
         # web
         nikto gobuster ffuf sqlmap wpscan nuclei \
+        # api / web app (httpx prober, crawler, param discovery, cmd-injection, WAF fingerprint)
+        httpx-toolkit gospider arjun commix wafw00f \
         # network / enum
         enum4linux-ng smbclient snmp \
         sslscan hydra \

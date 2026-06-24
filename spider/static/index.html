@@ -227,6 +227,10 @@
           <button class="btn" onclick="testKali()">Test connection</button>
           <span id="kaliTestStatus" class="muted"></span>
         </div>
+        <div class="toolbar">
+          <label class="chk"><input id="outputFilterEnabled" type="checkbox" /> filter tool output (show agents only the notable findings)</label>
+          <span class="muted">Strips banners/progress/log noise from every offensive tool. Agents can still request the full output per call (<code>raw=true</code>); turning this off sends the complete raw output unchanged.</span>
+        </div>
 
         <h3>Sub-agent spawning limits</h3>
         <p class="muted" style="margin:0 0 8px">Bound how the agent tree can grow. Framework helper agents

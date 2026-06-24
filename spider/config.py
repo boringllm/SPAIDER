@@ -219,6 +219,12 @@ def default_config() -> dict[str, Any]:
             "token": "",
             "assign_roles": ["recon", "web_app", "network", "exploitation", "post_exploit"],
         },
+        # ---- Offensive-tool output filtering ------------------------------------
+        # When enabled, the Kali server statically filters each tool's output down to its
+        # notable findings before the agent sees it (less noise / context waste). Agents can
+        # still request the full output per call with raw=true, and turning this OFF returns
+        # every tool's complete output unchanged. Admin-controlled (Settings → Output filtering).
+        "output_filter": {"enabled": True},
         # Sub-agent spawning limits (safety against runaway recursion).
         "limits": {
             "max_children_per_agent": 5,

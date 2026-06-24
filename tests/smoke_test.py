@@ -174,7 +174,9 @@ async def test_validation_and_raw_events() -> None:
 
 async def test_turn_budget_handoff() -> None:
     """An agent that hits its turn budget before calling finish has its work summarized by a
-    summarizer (handoff) so findings aren't lost, and a sub-agent is routed to validation."""
+    summarizer (handoff) so findings aren't lost. The exhausted agent CLOSES as done (auto-
+    accepted) instead of being parked forever in 'waiting_validation' — an involuntary turn-budget
+    close is not a deliberate finish that needs parent sign-off."""
     import tempfile
 
     from spider import config
@@ -196,7 +198,48 @@ async def test_turn_budget_handoff() -> None:
     check("exhausted agent got a handoff summary", res.startswith("[REACHED MAX TURN BUDGET"))
     check("a summarizer was spawned for the handoff",
           any(a.role == "summarizer" for a in sess.agents.values()))
-    check("exhausted sub-agent routed to validation", child.status == "waiting_validation")
+    check("exhausted sub-agent closes done (not stuck awaiting validation)", child.status == "done")
+    check("exhausted sub-agent is not awaiting validation", child.awaiting_validation is False)
+    await sess.shutdown()
+
+
+async def test_reengage_after_stop() -> None:
+    """After the operator stops an agent (or the whole session), they can resume a conversation
+    with it: run_followup clears the stop flag so the loop runs again instead of breaking out
+    immediately, and messaging an agent in a stopped session revives the session."""
+    import tempfile
+
+    from spider import config
+    from spider.db import Database
+    from spider.session import Session
+
+    tmp = Path(tempfile.mkdtemp(prefix="spider_reengage_"))
+    cfg = _mock_cfg()
+    cfg["workspace_root"] = str(tmp / "workspaces")
+    cfg["agents_dir"] = str(tmp / "agents")
+    config.CONFIG_DIR = tmp / "config"
+    sess = Session("reengage", "t", cfg, Database(str(tmp / "r.db")))
+    await sess.setup()
+    agent = await sess.create_agent("recon", "look around", parent=None)
+
+    # (1) single-agent stop, then re-engage: the stop flag must be cleared so the loop runs,
+    # but the TURN BUDGET must be PRESERVED (stop/resume is not a way to get a fresh budget).
+    agent._turns = 5
+    agent.stop()
+    check("agent is stopped", agent.stopped is True)
+    agent.inbox.put_nowait("[Message from operator]: are you there?")
+    res = await asyncio.wait_for(agent.run_followup(), timeout=20)
+    check("re-engaged agent's loop actually ran (stop flag cleared)", agent.stopped is False)
+    check("re-engaged agent produced a result", isinstance(res, str) and res != "Stopped by operator.")
+    check("turn budget preserved across stop/resume (not reset to 0)", agent._turns > 5)
+
+    # (2) full session stop, then message an agent -> session revives to running.
+    await sess.stop()
+    check("session is stopped", sess.status == "stopped")
+    out = await sess.message_agent(agent.id, "resume please")
+    check("messaging an agent revives a stopped session", sess.status == "running")
+    check("message_agent re-activated the agent", "re-activated" in out or "delivered" in out)
+    await asyncio.sleep(0.1)
     await sess.shutdown()
 
 
@@ -217,10 +260,20 @@ async def test_plan_approval_flow() -> None:
         await asyncio.sleep(0.02)
     pend = s.pending_plan_approvals()
     check("plan approval requested", len(pend) == 1)
+    # While the operator hasn't decided, the agent's wait is a real WAIT, not an "unfinished"
+    # state: has_pending_plan_approval is True and await_plan_decision_for blocks (not returns None).
+    check("pending plan approval is tracked", s.has_pending_plan_approval(agent.id) is True)
+    waiter = asyncio.create_task(s.await_plan_decision_for(agent))
+    await asyncio.sleep(0.05)
+    check("await_plan_decision_for blocks until operator decides", not waiter.done())
     if pend:
         s.resolve_plan_approval(pend[0]["id"], "approve")
     result = await asyncio.wait_for(task, timeout=2)
     check("approved plan returns proceed", "APPROVED" in result or "proceed" in result.lower(), f"({result})")
+    waited = await asyncio.wait_for(waiter, timeout=2)
+    check("idle-turn waiter gets the operator's verdict", waited is not None and "APPROVED" in waited)
+    check("no pending approval after resolve", s.has_pending_plan_approval() is False)
+    check("await returns None when nothing pending", await s.await_plan_decision_for(agent) is None)
     db.close()
 
 
@@ -394,6 +447,15 @@ def test_kali_server() -> None:
                              "params": {"name": "does_not_exist", "arguments": {}}})
     check("kali unknown tool -> isError", r.json()["result"]["isError"] is True)
 
+    # new API/web tools are registered
+    check("new api/web tools present",
+          {"http_probe", "web_crawl", "param_discover", "commix_test", "waf_detect"} <= set(names))
+    # filterable tools advertise a `raw` opt-out in their schema + a filterable meta flag
+    tl2 = {t["name"]: t for t in mcp_tool_list()}
+    check("filterable tool exposes raw param", "raw" in tl2["nmap_scan"]["inputSchema"]["properties"])
+    check("filterable tool flagged in meta", tl2["nmap_scan"]["_meta"]["filterable"] is True)
+    check("agent-output tool not filtered", tl2["run_command"]["_meta"]["filterable"] is False)
+
     # global concurrency cap: tool subprocesses run under a shared limiter so several users can't
     # swamp the one container with parallel scans. _limiter() yields an async context manager.
     from kali_server.tools import _common
@@ -416,6 +478,7 @@ def main() -> int:
     print("- end-to-end (mock)");   asyncio.run(test_end_to_end())
     print("- validation & raw");    asyncio.run(test_validation_and_raw_events())
     print("- turn-budget handoff");  asyncio.run(test_turn_budget_handoff())
+    print("- re-engage after stop"); asyncio.run(test_reengage_after_stop())
     print(f"\n== {_passed}/{_passed + _failed} checks passed ==")
     return 1 if _failed else 0
 

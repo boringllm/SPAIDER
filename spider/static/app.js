@@ -977,6 +977,7 @@ function renderConfig() {
   document.getElementById("kaliEnabled").checked = !!kali.enabled;
   document.getElementById("kaliUrl").value = kali.url || "";
   document.getElementById("kaliToken").value = kali.token || "";
+  document.getElementById("outputFilterEnabled").checked = (c.output_filter || {}).enabled !== false;
   renderToolApproval();
   const opt = (cur, vals) => vals.map(v => `<option ${cur === v ? "selected" : ""}>${v}</option>`).join("");
   const num = (role, key, m) => `<label>${key}<input data-role="${role}" data-key="${key}" type="number" step="any" value="${m[key] == null ? "" : m[key]}"></label>`;
@@ -1223,6 +1224,8 @@ async function saveConfig() {
   c.kali.url = document.getElementById("kaliUrl").value.trim();
   c.kali.token = document.getElementById("kaliToken").value;
   if (!c.kali.assign_roles) c.kali.assign_roles = ["recon", "web_app", "network", "exploitation", "post_exploit"];
+  c.output_filter = c.output_filter || {};
+  c.output_filter.enabled = document.getElementById("outputFilterEnabled").checked;
   // Tool-approval policy
   const pol = c.tool_approval = c.tool_approval || { by_category: {}, always_manual_tools: [], always_auto_tools: [] };
   pol.default = document.getElementById("toolApprovalDefault").value;

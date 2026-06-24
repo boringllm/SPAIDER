@@ -235,8 +235,11 @@ def _make_handler(client: MCPClient, tool_name: str):
     (A closure so each wrapped tool remembers its own client and original name.) Tags the call
     with who launched it so the Kali server's process monitor can attribute the running command."""
     async def handler(agent: "Agent", args: dict[str, Any]) -> str:
+        # `filter` carries the operator's global output-filtering setting to the Kali server,
+        # which uses it (unless the agent passed raw=true) to decide whether to trim tool output.
+        filt = bool(((agent.session.cfg.get("output_filter") or {}).get("enabled", True)))
         meta = {"session": agent.session.id, "agent": agent.id,
-                "agent_name": agent.name, "tool": tool_name}
+                "agent_name": agent.name, "tool": tool_name, "filter": filt}
         return await client.call_tool(tool_name, args, meta=meta)
 
     return handler

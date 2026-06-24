@@ -54,6 +54,7 @@ class Agent:
         # "waiting_validation" until its parent accepts it (then _validated=True, status done).
         self._validated = parent is None  # the root (orchestrator) needs no validation
         self._finish_nudges = 0           # times we've nudged this agent to call finish
+        self._exhausted = False           # already did the turn-budget handoff (don't repeat it)
         self._stop = asyncio.Event()
         self.inbox: "asyncio.Queue[str]" = asyncio.Queue()
         self.is_running = False
@@ -147,9 +148,17 @@ class Agent:
         return await self._loop()
 
     async def run_followup(self) -> str:
-        # Re-activate an idle/finished agent (e.g. to answer a query). The new
-        # inbox message(s) are drained at the top of the loop.
+        # Re-activate an idle / finished / STOPPED agent (operator re-engagement, a parent
+        # send-back, or an ask_parent/message reply). Clear the stop flag — otherwise a
+        # previously-stopped agent's loop would break out immediately on the `if self.stopped`
+        # check and the operator could never resume a conversation with it. The TURN BUDGET
+        # (`self._turns`) is deliberately PRESERVED across stop/re-activation: it is a per-session
+        # limit, so stopping then resuming an agent must NOT hand it a fresh budget. Only the
+        # finish-nudge counter is reset, so the new exchange gets its own "are you done?" cycle.
+        # New inbox message(s) are drained at the top of the loop.
+        self._stop.clear()
         self._finished = False
+        self._finish_nudges = 0
         return await self._loop()
 
     def _drain_inbox(self) -> None:
@@ -239,25 +248,50 @@ class Agent:
                     # agents silently ending mid-analysis.
                     if self._finished:
                         break
+                    # If this agent submitted a plan that is still awaiting the operator, an idle
+                    # turn means "I'm waiting for approval" — that is NOT an unfinished conversation.
+                    # Block on the operator's decision and feed it back, instead of nudging to finish.
+                    pending_decision = await self.session.await_plan_decision_for(self)
+                    if pending_decision is not None:
+                        self.messages.append({"role": "user", "content": [{"type": "text", "text": pending_decision}]})
+                        self._emit_message("user", pending_decision)
+                        continue
                     if self._finish_nudges < MAX_FINISH_NUDGES:
                         self._finish_nudges += 1
-                        has_ask_user = "ask_user" in self.tools
-                        ask_clause = (
-                            " If you stopped because you need a decision, missing information, a "
-                            "credential, or extra scope that only the human operator can give, call "
-                            "`ask_user` with a specific question — it will alert the operator and "
-                            "return their answer."
-                            if has_ask_user else
-                            " If you need a human decision or extra scope, use `ask_parent` to "
-                            "escalate to the agent that spawned you."
-                        )
-                        nudge = (
-                            "You ended your turn without calling any tool and without calling "
-                            "`finish`. Decide how to proceed: (1) if your assigned task is genuinely "
-                            "COMPLETE, call `finish` now with a concise summary and the evidence; "
-                            "(2) if it is NOT complete, continue the work by calling the appropriate "
-                            "tools — do not stop here." + ask_clause
-                        )
+                        if self.parent_id is None and self.role == "orchestrator":
+                            # The orchestrator drives the whole engagement, so an idle turn is almost
+                            # never "finished". Plan approval is SYNCHRONOUS (`update_plan` blocks and
+                            # returns the operator's decision), so it must not sit idle "waiting for
+                            # approval" — steer it to act, and only finish when the engagement is done.
+                            nudge = (
+                                "You ended your turn without taking an action. Do NOT stop here unless "
+                                "the ENTIRE engagement is genuinely complete (all plan steps done and "
+                                "findings reported) — only then call `finish`.\n"
+                                "- Plan approval is synchronous: `update_plan` blocks and RETURNS the "
+                                "operator's decision, so never idle 'waiting for approval'. If you have "
+                                "not actually submitted a plan yet, call `update_plan` now; once it is "
+                                "approved, proceed.\n"
+                                "- Otherwise continue the engagement: delegate the next plan step to a "
+                                "specialist agent, or call `ask_user` if you need an operator decision."
+                            )
+                        else:
+                            has_ask_user = "ask_user" in self.tools
+                            ask_clause = (
+                                " If you stopped because you need a decision, missing information, a "
+                                "credential, or extra scope that only the human operator can give, call "
+                                "`ask_user` with a specific question — it will alert the operator and "
+                                "return their answer."
+                                if has_ask_user else
+                                " If you need a human decision or extra scope, use `ask_parent` to "
+                                "escalate to the agent that spawned you."
+                            )
+                            nudge = (
+                                "You ended your turn without calling any tool and without calling "
+                                "`finish`. Decide how to proceed: (1) if your assigned task is genuinely "
+                                "COMPLETE, call `finish` now with a concise summary and the evidence; "
+                                "(2) if it is NOT complete, continue the work by calling the appropriate "
+                                "tools — do not stop here." + ask_clause
+                            )
                         self.messages.append({"role": "user", "content": [{"type": "text", "text": nudge}]})
                         self._emit_message("user", nudge)
                         continue
@@ -291,14 +325,26 @@ class Agent:
                 # what remains) and use that as the result, so its findings still reach the parent
                 # / orchestrator and the shared/master memory. Helper agents (summarizer /
                 # tool_selector) are excluded — that would recurse and they carry no findings.
-                if self.role not in ("summarizer", "tool_selector"):
-                    self.result = await self._summarize_on_exhaustion(max_turns)
-                    # Route the summarized findings to the parent for validation (same path as a
-                    # normal finish), unless this is the root orchestrator (nobody to validate it).
-                    if self.parent_id:
-                        self._finished = True
-                else:
+                if self.role in ("summarizer", "tool_selector"):
                     self.result = self.result or "Reached maximum turn budget."
+                elif self._exhausted:
+                    # Already did the turn-budget handoff in an earlier run. The budget is preserved
+                    # across stop/re-activation, so a re-engaged agent that is still out of turns must
+                    # NOT spawn another summarizer — just hand back its existing summary.
+                    self.result = self.result or "Out of turn budget (already summarized)."
+                    self._finished = True
+                    self._validated = True
+                else:
+                    self.result = await self._summarize_on_exhaustion(max_turns)
+                    # The agent was force-summarized because it ran OUT OF TURNS — an involuntary
+                    # close, not a deliberate `finish`. Do NOT park it in 'waiting_validation': a
+                    # parent might never validate it, leaving it stuck forever with its memory
+                    # unrecorded. Close it as done + auto-accepted; the handoff summary is its result
+                    # and still reaches the parent the same way a finish does. The turn budget is
+                    # PRESERVED on any later re-engagement (run_followup) — it doesn't get a reset.
+                    self._exhausted = True
+                    self._finished = True
+                    self._validated = True
 
             if self.status not in ("error", "stopped"):
                 # A spawned sub-agent that finished is held for its parent to validate before it

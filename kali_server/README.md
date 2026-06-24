@@ -107,33 +107,79 @@ so it works on Linux too). Spider detects a localhost target and tells the agent
 ## Tools included
 | Category | Tools |
 |---|---|
-| recon | `nmap_scan`, `dns_enum`, `whois_lookup`, `whatweb_scan` |
-| web | `nikto_scan`, `gobuster_dir`, `ffuf_fuzz`, `sqlmap_test`, `wpscan_scan` |
+| recon | `nmap_scan`, `dns_enum`, `whois_lookup`, `whatweb_scan`, `http_probe` (httpx), `web_crawl` (gospider), `waf_detect` (wafw00f) |
+| web / API | `nikto_scan`, `gobuster_dir`, `ffuf_fuzz`, `sqlmap_test`, `wpscan_scan`, `param_discover` (arjun) |
 | enum / network | `enum4linux`, `smb_list_shares`, `snmp_enum`, `ssl_scan` |
-| exploit | `searchsploit`, `nuclei_scan`, `metasploit_run`, `run_poc` (write + run a PoC in Kali) |
+| exploit | `searchsploit`, `nuclei_scan`, `metasploit_run`, `commix_test` (cmd injection), `run_poc` (write + run a PoC in Kali) |
 | bruteforce | `hydra_bruteforce` |
 | shell / filesystem | `run_command`, `write_file`, `read_file` |
 
-## Add your own tool
-Create or extend a module in `kali_server/tools/`, decorate an async handler, and import the
-module in `tools/__init__.py`:
+The `api_web.py` module adds a web/API wave: **`http_probe`** (bulk httpx probing/fingerprint),
+**`web_crawl`** (gospider crawl → endpoints/forms/JS URLs), **`param_discover`** (arjun hidden-
+parameter discovery), **`commix_test`** (OS command-injection), and **`waf_detect`** (wafw00f).
 
+## Output filtering
+Raw offensive-tool output is mostly noise (banners, progress bars, per-cipher dumps, INFO/DEBUG
+logs, legal notices). `tools/_filters.py` gives each tool a **purely static** filter that keeps
+only the interesting discoveries (open ports, found paths, vulns, creds, DNS records, parameters…)
+and drops the rest before the agent sees it — saving the agent's context.
+
+* **Per call:** an agent can pass `raw=true` to any filterable tool to get the COMPLETE unfiltered
+  output (the parameter is auto-advertised in the tool's schema).
+* **Globally:** Spider sends the operator's *Settings → Kali → filter tool output* preference in the
+  JSON-RPC `_meta`; when off, `_maybe_filter` returns every tool's output unchanged.
+* **Safe by design:** errors/timeouts/killed runs and tiny outputs are never filtered, and a footer
+  always reports how many lines were hidden — a filter can't silently mislead. Tools with already-
+  concise or agent-authored output (`run_command`, `run_poc`, `write_file`, `read_file`) are left
+  unfiltered. Coverage is verified by `tests/test_filters.py` (run it after editing a filter).
+
+## Add your own tool
+Adding a tool to the Kali container is four small steps. Spider discovers it automatically (with its
+category and availability) on the next connect — no Spider-side code changes.
+
+**1. Install the binary** in the image so it ships with the container. Add the package to the right
+`apt-get install` line in [`Dockerfile`](Dockerfile) (or `pip install` it):
+```dockerfile
+        # web / api ...
+        httpx-toolkit gospider arjun commix wafw00f  mynewtool \
+```
+
+**2. Write the tool handler.** Create or extend a module in `kali_server/tools/`, decorate an
+`async def` handler with `@tool(...)`, and use the `_common` helpers (`require_arg`, `check_scope`,
+`run`/`run_shell`, and the intensity helpers `threads`/`rate`/`nmap_timing`/`hydra_tasks`):
 ```python
 from ..registry import tool
 from ._common import check_scope, require_arg, run, threads
 
 @tool(
-    name="my_scanner",
-    category="enum",
-    requires=["mytool"],         # Kali binaries it needs
-    description="What it does and what each parameter changes (be precise about impact).",
+    name="my_scanner",            # the agent calls it as kali__my_scanner
+    category="enum",              # one of Spider's TOOL_CATEGORIES — drives the approval policy
+    requires=["mynewtool"],       # Kali binaries it needs; a missing one is reported cleanly
+    description="What it does and what each parameter changes (be precise about impact/loudness).",
     input_schema={"type": "object",
                   "properties": {"target": {"type": "string", "description": "..."}},
                   "required": ["target"]},
 )
 async def my_scanner(args: dict) -> str:
     target = require_arg(args, "target")
-    check_scope(target)
-    return await run(["mytool", "-t", str(threads(args.get("intensity"))), target])
+    check_scope(target)           # honour SPIDER_SCOPE
+    # run() registers the process (kill/monitor), enforces the parallel cap, and times out.
+    return await run(["mynewtool", "-t", str(threads(args.get("intensity"))), target])
 ```
-It then appears to Spider automatically (with its category and availability) on the next connect.
+
+**3. Register the module** so it loads: add it to the import line in
+[`tools/__init__.py`](tools/__init__.py).
+
+**4. (Recommended) Add a static output filter** so the agent isn't flooded with the tool's noise.
+In [`tools/_filters.py`](tools/_filters.py) write `def _f_my_scanner(lines: list[str]) -> list[str]`
+that returns only the interesting lines, and register it in the `FILTERS` dict under the tool's
+name. The framework already strips ANSI colour and normalises `\r` progress bars before your filter
+runs, and it auto-adds the `raw=true` opt-out + the footer. Add a case to
+[`tests/test_filters.py`](tests/test_filters.py) (feed a real sample, assert the findings survive
+and the noise is dropped) and run `python kali_server/tests/test_filters.py`. Skip this step only
+for tools whose output is already concise or agent-authored — unregistered tools pass through
+unchanged.
+
+**Functions you touch:** `@tool` (registration, `registry.py`), the `_common` run/scope/intensity
+helpers, `tools/__init__.py` (import), and — for filtering — `_filters.FILTERS` + your `_f_*`
+function. Then rebuild & restart the container: `docker compose up -d --build`.

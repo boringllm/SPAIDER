@@ -1072,6 +1072,36 @@ class Session:
         return [{k: v for k, v in p.items() if k != "future"}
                 for p in self._pending_plan_approvals.values()]
 
+    def has_pending_plan_approval(self, agent_id: str | None = None) -> bool:
+        """True if a plan (submitted by ``agent_id``, or any agent when None) is still awaiting the
+        operator's decision. Lets the agent loop tell a genuine 'waiting for approval' state apart
+        from a finished one, so it doesn't nudge the orchestrator toward `finish` while it waits."""
+        return any(agent_id in (None, p.get("agent_id"))
+                   for p in self._pending_plan_approvals.values())
+
+    async def await_plan_decision_for(self, agent: Agent) -> str | None:
+        """If ``agent`` has a plan still awaiting the operator, BLOCK until they decide and return
+        the verdict message for the agent to act on — turning an idle 'standing by for approval'
+        turn into a real wait instead of an 'unfinished conversation' nudge. Returns None when no
+        plan of this agent's is pending (the normal case, since blocking `submit_plan` already
+        awaits its own decision inline)."""
+        pend = next((p for p in self._pending_plan_approvals.values()
+                     if p.get("agent_id") == agent.id), None)
+        if not pend:
+            return None
+        try:
+            decision = await pend["future"]
+        except asyncio.CancelledError:
+            return None
+        verdict = decision.get("decision", "approve")
+        feedback = (decision.get("feedback") or "").strip()
+        if verdict == "edit":
+            return "Operator EDITED and approved the plan — proceed with the UPDATED plan."
+        if verdict == "reject":
+            return (f"Operator REJECTED the plan. Feedback: {feedback or '(none given)'}. "
+                    f"Revise the plan and call `update_plan` again.")
+        return "Operator APPROVED the plan. Proceed with execution."
+
     # ------------------------------------------------- operator interjection / intensity
     async def interject(self, message: str) -> str:
         """Deliver an operator message / new direction to the orchestrator mid-engagement.
@@ -1486,11 +1516,35 @@ class Session:
         agent = self.agents.get(agent_id)
         if not agent:
             return "no such agent"
+        # Re-engaging after the session was stopped: revive it first so the agent's MCP tools and
+        # the event log are live again (stop() closed them) and the UI shows it active.
+        if self.status == "stopped":
+            await self.revive()
         agent.deliver(message, sender="operator")
         if not agent.is_running:
             asyncio.create_task(self._resume_agent(agent))
             return "delivered; agent re-activated"
         return "delivered to active agent"
+
+    async def revive(self) -> None:
+        """Bring a STOPPED session back to a working state so the operator can resume a
+        conversation with its agents. ``stop()`` cancels the agents' tasks, kills Kali processes
+        and (via ``shutdown``) closes the MCP tool servers + event log; this undoes the teardown:
+        reconnect each MCP client IN PLACE (same objects the agents' tools are already bound to,
+        so their tools work again), restart the event log, and mark the session running. The
+        per-agent stop flags are cleared lazily by ``run_followup`` when each agent is re-engaged."""
+        if self.status != "stopped":
+            return
+        self._start_event_log()
+        for client in self.mcp_clients.values():
+            if client and not client.connected:
+                try:
+                    await client.connect()
+                except Exception as e:  # noqa: BLE001 — a tool server may be gone; carry on without it
+                    bus.emit(E.LOG, self.id, {"level": "warn",
+                             "message": f"could not reconnect MCP '{client.name}' on resume: {e}"})
+        self._set_status("running")
+        await self.persist()
 
     async def _resume_agent(self, agent: Agent) -> None:
         # run a follow-up loop for an idle agent prodded by the operator
