@@ -1,0 +1,29 @@
+"""Entry point for the Spider Kali MCP server. Run this INSIDE your Kali container.
+
+    python -m kali_server.run --host 0.0.0.0 --port 8765
+
+Then point Spider's config `kali.url` at  http://<kali-host>:8765/mcp
+
+Environment variables:
+    SPIDER_KALI_TOKEN   require this bearer token on every request (recommended)
+    SPIDER_SCOPE        comma-separated hosts/CIDRs; tools refuse targets outside it
+    SPIDER_KALI_WORKDIR working directory for the generic terminal/file tools (default /root/spider)
+"""
+from __future__ import annotations
+
+import argparse
+
+import uvicorn
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description="Spider Kali MCP server")
+    ap.add_argument("--host", default="0.0.0.0", help="bind address (default 0.0.0.0)")
+    ap.add_argument("--port", type=int, default=8765)
+    args = ap.parse_args()
+    print(f"Spider Kali MCP server -> http://{args.host}:{args.port}/mcp  (status page at / )", flush=True)
+    uvicorn.run("kali_server.server:app", host=args.host, port=args.port)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,326 @@
+{
+  "approval_mode": "manual",
+  "max_context_tokens": 800000,
+  "workspace_root": "C:\\temp\\LLM\\Spider\\workspaces",
+  "agents_dir": "C:\\temp\\LLM\\Spider\\agents",
+  "models": {
+    "orchestrator": {
+      "provider": "anthropic",
+      "model": "claude-opus-4-8",
+      "api_key": "",
+      "base_url": "",
+      "max_tokens": 8000,
+      "max_turns": 40,
+      "request_timeout": 300,
+      "max_retries": 2,
+      "max_tool_size": 0,
+      "thinking": "off",
+      "thinking_budget": 8000,
+      "thinking_display": "summarized",
+      "effort": "",
+      "temperature": null,
+      "top_p": null,
+      "top_k": null,
+      "frequency_penalty": null,
+      "presence_penalty": null,
+      "seed": null,
+      "reasoning_effort": "",
+      "stop": [],
+      "param_overrides": {}
+    },
+    "recon": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "api_key": "",
+      "base_url": "",
+      "max_tokens": 8000,
+      "max_turns": 40,
+      "request_timeout": 300,
+      "max_retries": 2,
+      "max_tool_size": 0,
+      "thinking": "off",
+      "thinking_budget": 8000,
+      "thinking_display": "summarized",
+      "effort": "",
+      "temperature": null,
+      "top_p": null,
+      "top_k": null,
+      "frequency_penalty": null,
+      "presence_penalty": null,
+      "seed": null,
+      "reasoning_effort": "",
+      "stop": [],
+      "param_overrides": {}
+    },
+    "web_app": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "api_key": "",
+      "base_url": "",
+      "max_tokens": 8000,
+      "max_turns": 40,
+      "request_timeout": 300,
+      "max_retries": 2,
+      "max_tool_size": 0,
+      "thinking": "off",
+      "thinking_budget": 8000,
+      "thinking_display": "summarized",
+      "effort": "",
+      "temperature": null,
+      "top_p": null,
+      "top_k": null,
+      "frequency_penalty": null,
+      "presence_penalty": null,
+      "seed": null,
+      "reasoning_effort": "",
+      "stop": [],
+      "param_overrides": {}
+    },
+    "network": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "api_key": "",
+      "base_url": "",
+      "max_tokens": 8000,
+      "max_turns": 40,
+      "request_timeout": 300,
+      "max_retries": 2,
+      "max_tool_size": 0,
+      "thinking": "off",
+      "thinking_budget": 8000,
+      "thinking_display": "summarized",
+      "effort": "",
+      "temperature": null,
+      "top_p": null,
+      "top_k": null,
+      "frequency_penalty": null,
+      "presence_penalty": null,
+      "seed": null,
+      "reasoning_effort": "",
+      "stop": [],
+      "param_overrides": {}
+    },
+    "exploitation": {
+      "provider": "anthropic",
+      "model": "claude-opus-4-8",
+      "api_key": "",
+      "base_url": "",
+      "max_tokens": 8000,
+      "max_turns": 40,
+      "request_timeout": 300,
+      "max_retries": 2,
+      "max_tool_size": 0,
+      "thinking": "off",
+      "thinking_budget": 8000,
+      "thinking_display": "summarized",
+      "effort": "",
+      "temperature": null,
+      "top_p": null,
+      "top_k": null,
+      "frequency_penalty": null,
+      "presence_penalty": null,
+      "seed": null,
+      "reasoning_effort": "",
+      "stop": [],
+      "param_overrides": {}
+    },
+    "post_exploit": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "api_key": "",
+      "base_url": "",
+      "max_tokens": 8000,
+      "max_turns": 40,
+      "request_timeout": 300,
+      "max_retries": 2,
+      "max_tool_size": 0,
+      "thinking": "off",
+      "thinking_budget": 8000,
+      "thinking_display": "summarized",
+      "effort": "",
+      "temperature": null,
+      "top_p": null,
+      "top_k": null,
+      "frequency_penalty": null,
+      "presence_penalty": null,
+      "seed": null,
+      "reasoning_effort": "",
+      "stop": [],
+      "param_overrides": {}
+    },
+    "reporting": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "api_key": "",
+      "base_url": "",
+      "max_tokens": 8000,
+      "max_turns": 40,
+      "request_timeout": 300,
+      "max_retries": 2,
+      "max_tool_size": 0,
+      "thinking": "off",
+      "thinking_budget": 8000,
+      "thinking_display": "summarized",
+      "effort": "",
+      "temperature": null,
+      "top_p": null,
+      "top_k": null,
+      "frequency_penalty": null,
+      "presence_penalty": null,
+      "seed": null,
+      "reasoning_effort": "",
+      "stop": [],
+      "param_overrides": {}
+    },
+    "summarizer": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "api_key": "",
+      "base_url": "",
+      "max_tokens": 8000,
+      "max_turns": 40,
+      "request_timeout": 300,
+      "max_retries": 2,
+      "max_tool_size": 0,
+      "thinking": "off",
+      "thinking_budget": 8000,
+      "thinking_display": "summarized",
+      "effort": "",
+      "temperature": null,
+      "top_p": null,
+      "top_k": null,
+      "frequency_penalty": null,
+      "presence_penalty": null,
+      "seed": null,
+      "reasoning_effort": "",
+      "stop": [],
+      "param_overrides": {}
+    },
+    "tool_selector": {
+      "provider": "anthropic",
+      "model": "claude-haiku-4-5",
+      "api_key": "",
+      "base_url": "",
+      "max_tokens": 8000,
+      "max_turns": 40,
+      "request_timeout": 300,
+      "max_retries": 2,
+      "max_tool_size": 0,
+      "thinking": "off",
+      "thinking_budget": 8000,
+      "thinking_display": "summarized",
+      "effort": "",
+      "temperature": null,
+      "top_p": null,
+      "top_k": null,
+      "frequency_penalty": null,
+      "presence_penalty": null,
+      "seed": null,
+      "reasoning_effort": "",
+      "stop": [],
+      "param_overrides": {}
+    }
+  },
+  "agent_skills": {
+    "orchestrator": [
+      "pentest_orchestration"
+    ],
+    "recon": [
+      "recon_methodology"
+    ],
+    "web_app": [
+      "web_app_testing"
+    ],
+    "network": [
+      "network_testing"
+    ],
+    "exploitation": [
+      "exploitation"
+    ],
+    "post_exploit": [
+      "post_exploitation"
+    ],
+    "reporting": [
+      "pentest_reporting"
+    ]
+  },
+  "human_in_the_loop": {
+    "plan_approval": "once",
+    "allow_interjection": true,
+    "block_on_plan_approval": true
+  },
+  "tool_approval": {
+    "default": "manual",
+    "by_category": {
+      "control": "auto",
+      "filesystem": "auto",
+      "recon": "auto",
+      "enum": "auto",
+      "shell": "manual",
+      "web": "manual",
+      "exploit": "manual",
+      "bruteforce": "manual",
+      "destructive": "manual",
+      "network": "manual"
+    },
+    "always_manual_tools": [],
+    "always_auto_tools": []
+  },
+  "default_intensity": "normal",
+  "poc_execution": "kali_only",
+  "kali": {
+    "enabled": false,
+    "url": "http://127.0.0.1:8765/mcp",
+    "assign_roles": [
+      "recon",
+      "web_app",
+      "network",
+      "exploitation",
+      "post_exploit"
+    ]
+  },
+  "limits": {
+    "max_children_per_agent": 5,
+    "max_total_agents": 20,
+    "max_spawn_depth": 3
+  },
+  "pricing": {
+    "claude-opus-4-8": {
+      "input": 5.0,
+      "output": 25.0,
+      "cache_read": 0.5,
+      "cache_write": 6.25
+    },
+    "claude-sonnet-4-6": {
+      "input": 3.0,
+      "output": 15.0,
+      "cache_read": 0.3,
+      "cache_write": 3.75
+    },
+    "claude-haiku-4-5": {
+      "input": 1.0,
+      "output": 5.0,
+      "cache_read": 0.1,
+      "cache_write": 1.25
+    },
+    "gpt-4o": {
+      "input": 2.5,
+      "output": 10.0,
+      "cache_read": 1.25,
+      "cache_write": 0.0
+    },
+    "gpt-4o-mini": {
+      "input": 0.15,
+      "output": 0.6,
+      "cache_read": 0.075,
+      "cache_write": 0.0
+    },
+    "mock-model": {
+      "input": 1.0,
+      "output": 3.0,
+      "cache_read": 0.1,
+      "cache_write": 1.25
+    }
+  },
+  "_comment": "EXAMPLE config. Copy to config/config.json and fill in. API keys can also come from ANTHROPIC_API_KEY / OPENAI_API_KEY env vars."
+}

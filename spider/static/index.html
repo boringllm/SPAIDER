@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Spider — Autonomous Penetration Testing</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <!-- Auth gate: shown until the user is authenticated. First run shows 'create admin'. -->
+  <div id="authOverlay" class="overlay auth-overlay">
+    <div class="auth-card">
+      <h1>🕷 Spider</h1>
+      <div id="authLogin" class="hidden">
+        <h3>Sign in</h3>
+        <label>Username<input id="loginUser" autocomplete="username"
+          onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()" /></label>
+        <label>Password<input id="loginPass" type="password" autocomplete="current-password"
+          onkeydown="if(event.key==='Enter')doLogin()" /></label>
+        <button class="primary" onclick="doLogin()">Sign in</button>
+        <div id="loginErr" class="auth-err"></div>
+      </div>
+      <div id="authSetup" class="hidden">
+        <h3>Create administrator</h3>
+        <p class="muted">First run — create the administrator account. The admin manages all users
+          and global settings. Use a strong password (min 8 characters).</p>
+        <label>Username<input id="setupUser" autocomplete="username" /></label>
+        <label>Password<input id="setupPass" type="password" autocomplete="new-password" /></label>
+        <label>Confirm password<input id="setupPass2" type="password" autocomplete="new-password"
+          onkeydown="if(event.key==='Enter')doSetup()" /></label>
+        <button class="primary" onclick="doSetup()">Create admin &amp; sign in</button>
+        <div id="setupErr" class="auth-err"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="app">
+    <aside class="sidebar" id="sidebar">
+      <h1>🕷 Spider<br><small>autonomous pentest</small></h1>
+      <div class="session-list" id="sessionList"></div>
+      <div class="actions user-bar" id="userBar">
+        <span id="userLabel" class="muted"></span>
+        <button class="small" onclick="doLogout()">Log out</button>
+      </div>
+      <div class="actions"><button class="primary" onclick="newSession()">+ New session</button></div>
+      <div class="actions" id="settingsAction"><button onclick="openSettings()">⚙ Settings</button></div>
+    </aside>
+
+    <main class="main">
+      <div id="noSession" class="empty">Select or create a session to begin.</div>
+
+      <div id="sessionView" class="hidden">
+        <!-- header: clearly separated groups -->
+        <div class="sess-header">
+          <div class="hrow hrow-top">
+            <span class="sess-title" id="sessName"></span>
+            <span id="sessStatus" class="badge">created</span>
+            <span class="grow"></span>
+            <span class="seg">
+              <button id="viewReverseBtn" class="active" onclick="setView('reverse')">Engagement</button>
+              <button id="viewDashBtn" onclick="setView('dashboard')">Dashboard</button>
+            </span>
+            <label class="hdr-intensity" title="Tool intensity — maps to safer/louder real flags">
+              ⚡<select id="intensitySelect" onchange="changeIntensity()">
+                <option value="passive">passive</option><option value="stealth">stealth</option>
+                <option value="normal" selected>normal</option><option value="aggressive">aggressive</option>
+                <option value="insane">insane</option>
+              </select>
+            </label>
+            <label class="hdr-bypass" title="Bypass tool approval for THIS session only (overrides the global policy). When on, commands run without asking you.">
+              <input id="bypassApproval" type="checkbox" onchange="toggleApprovalBypass()" /> 🔓 bypass approvals
+            </label>
+            <button id="panelsBtn" onclick="togglePanels()" title="Toggle Plan/Findings/Commands panels">▤ Panels</button>
+            <button id="reportBtn" onclick="openReport()" title="Generate a full report of this session">📄 Report</button>
+            <span id="wsStatus" class="muted">disconnected</span>
+          </div>
+          <div class="hrow hrow-controls">
+            <input id="targetInput" class="grow" placeholder="In-scope target(s), e.g. 10.10.10.5, https://app.example.com" />
+            <span class="btn-group">
+              <button class="primary" onclick="startSession()">▶ Start</button>
+              <button onclick="resumeSession()">⟳ Resume</button>
+              <button class="danger" onclick="stopSession()">■ Stop</button>
+            </span>
+          </div>
+          <div class="hrow">
+            <textarea id="instructionsInput" placeholder="Rules of engagement / scope: what is authorised, what is off-limits (no DoS, no data destruction), credentials provided, time window..."></textarea>
+          </div>
+          <div class="hrow hrow-attach">
+            <label class="attach-btn" title="Attach reference documents (.md, .txt, .pdf, .docx) — scope, rules of engagement, prior reports, target docs — to inform the engagement">
+              📎 Attach docs
+              <input id="uploadInput" type="file" accept=".md,.markdown,.txt,.pdf,.docx" multiple onchange="uploadFiles(this)" hidden />
+            </label>
+            <span id="uploadsList" class="uploads-list"></span>
+          </div>
+          <div class="hrow hrow-interject">
+            <input id="interjectInput" class="grow" placeholder="Interject — ask a question or steer the lead agent at any time..." onkeydown="if(event.key==='Enter')sendInterjection()" />
+            <button onclick="sendInterjection()" title="Send to the orchestrator">💬 Interject</button>
+          </div>
+          <div id="planApprovalWrap"></div>
+          <div id="approvalsWrap"></div>
+          <div id="requestsWrap"></div>
+        </div>
+
+        <!-- REVERSE: process tree | agent chat | toggle sub-windows -->
+        <div id="reverseView" class="reverse">
+          <div class="agent-tree" id="agentTree">
+            <div class="col-head">Agent tree</div>
+            <div id="treeBox"></div>
+          </div>
+
+          <div class="agent-main">
+            <div id="agentHead" class="agent-head empty">Start the session — agents will appear here.</div>
+            <div class="agent-tabs">
+              <button id="tabChatBtn" class="active" onclick="setAgentTab('chat')" title="Filtered chat — readable summary of what the agent said and did">💬 Chat</button>
+              <button id="tabRawBtn" onclick="setAgentTab('raw')" title="Raw LLM output — reasoning, answer, exact tool calls, stop reason; streamed live (for debugging)">⚙ Raw</button>
+              <button id="tabTermBtn" onclick="setAgentTab('terminal')" title="Commands this agent ran">▌ Terminal</button>
+              <span class="agent-tabs-hint">per-agent views — Chat is filtered, Raw is the live LLM stream</span>
+            </div>
+            <div id="agentFeed" class="agent-feed"></div>
+            <div id="agentRaw" class="agent-raw hidden"></div>
+            <div id="agentTerminal" class="agent-terminal hidden"></div>
+            <div class="agent-input">
+              <textarea id="agentMsg" placeholder="Message / steer the selected agent..."></textarea>
+              <button class="primary" onclick="sendAgentMessage()">Send</button>
+            </div>
+          </div>
+
+          <div class="reverse-side" id="reverseSide">
+            <div class="subwin" id="subwin-plan">
+              <div class="subwin-head" onclick="toggleSub('plan')">Pentest plan <span class="chev">▾</span></div>
+              <div class="subwin-body"><div id="planBox" class="empty">No plan yet.</div></div>
+            </div>
+            <div class="subwin" id="subwin-findings">
+              <div class="subwin-head" onclick="toggleSub('findings')">Findings <span class="chev">▾</span></div>
+              <div class="subwin-body"><div id="findingsBox" class="empty">No findings yet.</div></div>
+            </div>
+            <div class="subwin" id="subwin-procs">
+              <div class="subwin-head" onclick="toggleSub('procs')">Running in Kali <span id="procCount" class="proc-count"></span> <span class="chev">▾</span></div>
+              <div class="subwin-body"><div id="procsBox" class="empty">No processes running.</div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- DASHBOARD: cost only -->
+        <div id="dashboardView" class="dashboard hidden">
+          <div class="card">
+            <h3>Cost dashboard — this session</h3>
+            <div class="cost-grid" id="costGrid"></div>
+          </div>
+          <div class="card"><h3>Cost per agent</h3><table id="costByAgent"></table></div>
+          <div class="card"><h3>Cost per model</h3><table id="costByModel"></table></div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Settings overlay (tabbed) -->
+  <div id="configOverlay" class="overlay hidden">
+    <div class="overlay-inner">
+      <div class="settings-head">
+        <h2 style="margin:0">Settings</h2>
+        <nav class="settings-tabs">
+          <button data-tab="general" class="active" onclick="setSettingsTab('general')">General</button>
+          <button data-tab="models" onclick="setSettingsTab('models')">Models &amp; presets</button>
+          <button data-tab="agents" onclick="setSettingsTab('agents')">Agents &amp; skills</button>
+          <button data-tab="tools" onclick="setSettingsTab('tools')">Tools</button>
+          <button data-tab="pricing" onclick="setSettingsTab('pricing')">Pricing</button>
+          <button data-tab="users" onclick="setSettingsTab('users')">Users</button>
+        </nav>
+        <span class="grow"></span>
+        <button class="primary" onclick="saveConfig()">Save</button>
+        <span id="configSaved" class="muted"></span>
+        <button onclick="closeSettings()">Close ✕</button>
+      </div>
+
+      <!-- GENERAL -->
+      <section class="settings-page" data-page="general">
+        <h3>Engagement</h3>
+        <div class="toolbar">
+          <label>Approval mode
+            <select id="approvalMode">
+              <option value="manual">manual (apply the tool-approval policy)</option>
+              <option value="auto">auto (fully autonomous — bypass all gating)</option>
+            </select>
+          </label>
+          <label>Default tool intensity
+            <select id="defaultIntensity">
+              <option value="passive">passive</option><option value="stealth">stealth</option>
+              <option value="normal">normal</option><option value="aggressive">aggressive</option>
+              <option value="insane">insane</option>
+            </select>
+          </label>
+          <label>PoC execution
+            <select id="pocExecution">
+              <option value="kali_only">Kali only — exploits/PoCs run in the container (recommended)</option>
+              <option value="host">also allow host execution (legacy)</option>
+            </select>
+          </label>
+          <label>Max context tokens (auto-summarize above)
+            <input id="maxContextTokens" type="number" style="width:140px" />
+          </label>
+        </div>
+
+        <h3>Human-in-the-loop</h3>
+        <p class="muted" style="margin:0 0 8px">Control how much the operator is involved. The plan-approval mode
+          decides whether the orchestrator must get your sign-off before working; interjection lets you steer mid-run.</p>
+        <div class="toolbar">
+          <label>Plan approval
+            <select id="planApproval">
+              <option value="off">off — never ask</option>
+              <option value="once">once — approve the first plan</option>
+              <option value="on_change">on change — approve the plan and every revision</option>
+            </select>
+          </label>
+          <label class="chk"><input id="blockOnPlan" type="checkbox" /> pause engagement until the plan is approved</label>
+          <label class="chk"><input id="allowInterject" type="checkbox" /> allow operator interjection</label>
+        </div>
+
+        <h3>Kali offensive-tool server</h3>
+        <p class="muted" style="margin:0 0 8px">Spider drives real pentest tools through a Kali container running the
+          <code>kali_server/</code> MCP server. Enable it and point it at your Kali host; its tools (nmap, sqlmap, hydra…)
+          are assigned to the recon/web_app/network/exploitation/post_exploit agents on session start.</p>
+        <div class="toolbar">
+          <label class="chk"><input id="kaliEnabled" type="checkbox" /> enable Kali tools</label>
+          <label>Kali MCP URL<input id="kaliUrl" placeholder="http://kali-host:8765/mcp" style="width:280px" /></label>
+          <label>Bearer token<input id="kaliToken" type="password" placeholder="SPIDER_KALI_TOKEN (blank if none)" style="width:220px" /></label>
+          <button class="btn" onclick="testKali()">Test connection</button>
+          <span id="kaliTestStatus" class="muted"></span>
+        </div>
+
+        <h3>Sub-agent spawning limits</h3>
+        <p class="muted" style="margin:0 0 8px">Bound how the agent tree can grow. Framework helper agents
+          (tool_selector / summarizer) don't count toward the per-agent limit.</p>
+        <div class="toolbar">
+          <label>max sub-agents per agent<input id="limMaxChildren" type="number" min="0" style="width:120px" /></label>
+          <label>max total agents (session)<input id="limMaxTotal" type="number" min="1" style="width:120px" /></label>
+          <label>max spawn depth<input id="limMaxDepth" type="number" min="1" style="width:120px" /></label>
+        </div>
+      </section>
+
+      <!-- MODELS & PRESETS -->
+      <section class="settings-page hidden" data-page="models">
+        <h3>Parameter presets</h3>
+        <p class="muted" style="margin:0 0 8px">Save a model's parameters as a named preset and reuse it on any agent.
+          Apply a preset to an agent below, tweak, and re-save to edit it. Stored in <code>config/model_presets.json</code>.</p>
+        <div id="presetsConfig"></div>
+
+        <h3>Per-agent models / endpoints / keys / parameters</h3>
+        <p class="muted" style="margin:0 0 8px">All LLM parameters are shown; each agent's provider/model only sends the
+          ones it accepts (e.g. Opus 4.8 ignores sampling params; Haiku 4.5 ignores effort).
+          <b>max_tool_size</b>: cap on tools given to the model (0 = unlimited); over it, a <code>tool_selector</code>
+          agent picks the best subset (mandatory internal tools always kept).
+          <b>param renames</b>: fix endpoint drift, e.g. <code>max_tokens=max_completion_tokens</code>;
+          empty right side (<code>temperature=</code>) drops a parameter.
+          API keys are masked — use 👁 to reveal/copy.</p>
+        <div id="modelsConfig"></div>
+      </section>
+
+      <!-- AGENTS & SKILLS -->
+      <section class="settings-page hidden" data-page="agents">
+        <h3>Agents (add / remove)</h3>
+        <p class="muted" style="margin:0 0 8px">Built-in agents can't be removed. New custom agents become spawnable by the orchestrator
+          (edit the orchestrator prompt to tell it when to spawn them).</p>
+        <div id="rolesConfig"></div>
+        <div class="config-role">
+          <h4>Add custom agent</h4>
+          <div class="config-grid">
+            <label>role name (a-z_)<input id="newRoleName" placeholder="e.g. fuzzer" /></label>
+            <label>tools (comma, blank = default)<input id="newRoleTools" placeholder="read_file,run_process,finish" /></label>
+          </div>
+          <label class="muted" style="font-size:11px;margin-top:6px;display:block">system prompt</label>
+          <textarea id="newRolePrompt" style="min-height:70px" placeholder="You are a ... agent. Do X."></textarea>
+          <div class="toolbar" style="margin-top:6px">
+            <button class="primary small" onclick="addRole()">+ Add agent</button>
+            <span id="addRoleStatus" class="muted" style="font-size:11px"></span>
+          </div>
+        </div>
+
+        <h3>Agent prompts, skills &amp; per-folder MCP servers</h3>
+        <p class="muted" style="margin:0 0 8px">Edit each agent's system prompt; set how it uses each <b>skill</b> — <b>always load</b>
+          (static), <b>may load</b> (the agent loads it on demand via <code>load_skill</code> if a task needs it), or <b>never</b>;
+          edit skill content directly in the <code>skills/</code> folder. Add MCP servers by pasting a JSON config and naming it
+          (inherited by sub-agents). Toggle, test, or remove each server.</p>
+        <div id="agentDefsConfig"></div>
+      </section>
+
+      <!-- TOOLS -->
+      <section class="settings-page hidden" data-page="tools">
+        <h3>Tool-approval policy</h3>
+        <p class="muted" style="margin:0 0 8px">Decide what needs your sign-off. For each tool <b>category</b>, choose
+          <b>auto</b> (runs immediately) or <b>manual</b> (the agent pauses for your approval). This is Spider's main
+          safety control. Active only when Approval mode is <b>manual</b>; <code>run_as_admin</code> is always gated.</p>
+        <div class="toolbar"><label>Default for unlisted categories
+          <select id="toolApprovalDefault"><option value="auto">auto</option><option value="manual">manual</option></select>
+        </label></div>
+        <div id="toolApprovalConfig"></div>
+
+        <h3 style="margin-top:18px">Internal tools</h3>
+        <p class="muted" style="margin:0 0 8px">Built-in tools available to agents (the Kali offensive tools are listed by the
+          server when connected). Add new local ones in <code>spider/tools/custom.py</code> or <code>spider/tools/pentest.py</code>.
+          Each tool's <b>category</b> drives the approval policy above.</p>
+        <div id="toolsConfig"></div>
+      </section>
+
+      <!-- PRICING -->
+      <section class="settings-page hidden" data-page="pricing">
+        <h3>Pricing (USD / 1M tokens)</h3>
+        <p class="muted" style="margin:0 0 8px">Per-model token prices drive the cost dashboard. Add a model whose name matches
+          exactly what you set in an agent (e.g. <code>gpt-5.4</code>) so its usage is costed instead of showing $0.</p>
+        <div id="pricingConfig"></div>
+        <div class="config-role">
+          <h4>Add model pricing</h4>
+          <div class="config-grid">
+            <label>model name<input id="newPriceName" placeholder="e.g. gpt-5.4" /></label>
+            <label>input<input id="newPriceInput" type="number" step="0.01" value="0" /></label>
+            <label>output<input id="newPriceOutput" type="number" step="0.01" value="0" /></label>
+            <label>cache read<input id="newPriceCacheRead" type="number" step="0.01" value="0" /></label>
+            <label>cache write<input id="newPriceCacheWrite" type="number" step="0.01" value="0" /></label>
+          </div>
+          <div class="toolbar" style="margin-top:6px">
+            <button class="primary small" onclick="addPricing()">+ Add model</button>
+            <span id="addPriceStatus" class="muted" style="font-size:11px"></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- USERS (admin only) -->
+      <section class="settings-page hidden" data-page="users">
+        <h3>User accounts</h3>
+        <p class="muted" style="margin:0 0 8px">Only administrators manage accounts. Each user sees
+          only the sessions they created; admins see all sessions. Passwords are stored hashed
+          (scrypt) and are never shown. The last administrator cannot be deleted or disabled.</p>
+        <div id="usersConfig"></div>
+        <div class="config-role">
+          <h4>Add user</h4>
+          <div class="config-grid">
+            <label>username<input id="newUserName" placeholder="e.g. alice" autocomplete="off" /></label>
+            <label>password (min 8)<input id="newUserPass" type="password" autocomplete="new-password" /></label>
+            <label>role
+              <select id="newUserRole"><option value="user">user</option><option value="admin">admin</option></select>
+            </label>
+          </div>
+          <div class="toolbar" style="margin-top:6px">
+            <button class="primary small" onclick="addUser()">+ Add user</button>
+            <span id="addUserStatus" class="muted" style="font-size:11px"></span>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- Prompt view modal -->
+  <div id="promptModal" class="hidden modal-wrap">
+    <div class="card" style="width:680px;max-height:80vh;overflow:auto;margin:0">
+      <h3>System prompt — <span id="promptAgentName"></span></h3>
+      <div id="promptTask" class="muted" style="font-size:11px;margin-bottom:8px"></div>
+      <pre id="promptBody" class="prompt-pre"></pre>
+      <div style="display:flex;justify-content:flex-end;margin-top:8px"><button onclick="closePrompt()">Close</button></div>
+    </div>
+  </div>
+
+  <!-- Report request dialog -->
+  <div id="reportModal" class="hidden modal-wrap">
+    <div class="card" style="width:640px;max-height:85vh;overflow:auto;margin:0">
+      <h3>Generate session report</h3>
+      <p class="muted" style="margin:0 0 8px">A report-writer agent compiles the plan, findings and
+        activity into a full report. Output is produced as both <b>Markdown</b> and <b>Word (.docx)</b>.
+        Optionally give extra instructions and a template — the report follows the template's structure exactly.</p>
+      <label class="muted" style="font-size:11px">Further instructions (optional)</label>
+      <textarea id="reportInstr" style="min-height:60px" placeholder="e.g. Audience is non-technical management; keep it under two pages; emphasise remediation."></textarea>
+      <label class="muted" style="font-size:11px;margin-top:8px;display:block">Template (optional) — upload a .pdf / .docx / .md, or paste below. The report reproduces its structure exactly.</label>
+      <div class="toolbar" style="margin:4px 0 6px">
+        <label class="attach-btn" title="Upload a PDF / Word / Markdown template; its structure is extracted into the box below">
+          📎 Upload template
+          <input id="reportTemplateFile" type="file" accept=".md,.markdown,.txt,.pdf,.docx" onchange="uploadReportTemplate(this)" hidden />
+        </label>
+        <span id="reportTemplateStatus" class="muted" style="font-size:11px"></span>
+      </div>
+      <textarea id="reportTemplate" style="min-height:90px;font-family:ui-monospace,monospace" placeholder="# {Title}&#10;## Executive Summary&#10;## Findings&#10;... (or upload a template above)"></textarea>
+      <div class="toolbar" style="margin-top:10px">
+        <button class="primary" id="reportGenBtn" onclick="generateReport()">Generate report</button>
+        <span id="reportStatus" class="muted" style="font-size:12px"></span>
+        <span class="grow"></span>
+        <button onclick="closeReport()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Report result viewer -->
+  <div id="reportResultModal" class="hidden modal-wrap">
+    <div class="card" style="width:780px;max-height:88vh;overflow:auto;margin:0">
+      <div style="display:flex;align-items:center;gap:8px">
+        <h3 style="margin:0">Session report</h3>
+        <span id="reportPath" class="muted" style="font-size:11px"></span>
+        <span class="grow"></span>
+        <button class="small" onclick="copyReport()">Copy</button>
+        <button class="small primary" onclick="downloadReport()">Download .md</button>
+        <button class="small primary" id="downloadDocxBtn" onclick="downloadDocx()" style="display:none">Download .docx</button>
+        <button class="small" onclick="closeReportResult()">Close</button>
+      </div>
+      <pre id="reportBody" class="prompt-pre" style="margin-top:10px"></pre>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

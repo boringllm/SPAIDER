@@ -1,0 +1,6 @@
+# Spider Kali MCP server — runs inside the Kali container.
+# The offensive tools themselves (nmap, nikto, gobuster, ffuf, sqlmap, wpscan, hydra,
+# enum4linux-ng, smbclient, snmpwalk, sslscan, nuclei, searchsploit, metasploit, dnsrecon,
+# whatweb, whois) come from Kali's apt repos — this only needs the web server.
+fastapi>=0.110
+uvicorn[standard]>=0.29

@@ -1,0 +1,38 @@
+# secrets & local state — never commit
+config/config.json
+config/model_presets.json
+agents/*/mcp.json
+agents/custom_roles.json
+
+# generated runtime state
+spider.db
+spider.db-journal
+*.db
+*.db-journal
+*.bak
+*.bak_*
+spider.db.bak*
+workspaces/
+
+# environment / tooling
+.venv/
+__pycache__/
+*.pyc
+# secrets: ignore .env anywhere (incl. subfolders like kali_server/), keep .env.example templates
+.env
+**/.env
+!.env.example
+!**/.env.example
+
+# stray logs and build output
+*.log
+build/
+dist/
+*.manifest
+
+# Claude Code local artifacts (keep CLAUDE.md — it's project docs)
+.claude/
+.claude.json
+.mcp.json
+.cursor/
+CLAUDE.md

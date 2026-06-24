@@ -1,0 +1,41 @@
+# One-command run for the Spider Kali MCP server.
+#
+#   cp .env.example .env   &&   edit .env   &&   docker compose up -d
+#
+# If you LOADED a shared image (scripts/share.sh load …), it is already tagged
+# `spider-kali:latest`, so compose uses it as-is and won't rebuild. If the image is absent,
+# compose builds it from the Dockerfile here.
+services:
+  spider-kali:
+    # Published image — `docker compose pull` fetches it (no build needed). `build: .` lets you
+    # rebuild locally if you change the Dockerfile.
+    image: sungyongkim98/spider-kali:latest
+    build: .
+    container_name: spider-kali
+    # Run an init (tini) as PID 1 so orphaned tool processes are reaped — when the operator kills a
+    # running scan its child processes don't pile up as zombies.
+    init: true
+    ports:
+      - "${SPIDER_KALI_PORT:-8765}:8765"
+    environment:
+      # Per-deployment secrets/scope — NEVER baked into the shared image.
+      SPIDER_KALI_TOKEN: "${SPIDER_KALI_TOKEN:-}"   # bearer token Spider must send (recommended)
+      SPIDER_SCOPE: "${SPIDER_SCOPE:-}"             # comma-separated in-scope hosts/CIDRs
+      SPIDER_KALI_WORKDIR: "/root/spider"
+    # Lets tools inside the container reach a target running on the OPERATOR'S HOST as
+    # `host.docker.internal` (Docker Desktop provides it automatically; this mapping adds it on
+    # Linux too). Needed when the target is on localhost/127.0.0.1 of the host — inside the
+    # container 127.0.0.1 is the container itself.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # Raw sockets for SYN scans / some exploits. Drop these if you don't need them.
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8765/healthz').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

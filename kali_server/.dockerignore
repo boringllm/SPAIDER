@@ -1,0 +1,10 @@
+# Keep the built image lean: these are host-side helpers and artifacts, not server runtime.
+.env
+.dockerignore
+docker-compose.yml
+scripts/
+*.tar
+*.tar.gz
+__pycache__/
+**/__pycache__/
+*.pyc

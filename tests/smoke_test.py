@@ -1,0 +1,407 @@
+"""Offline smoke test for Spider. No API keys or Kali needed — uses the Mock LLM provider
+and FastAPI's TestClient. Run:  python tests/smoke_test.py
+
+Covers: config schema, pentest roles, categorised tools, the tool-approval policy, the
+plan-approval + interjection + intensity HITL flows, an end-to-end mock engagement, report
+generation, and the Kali MCP server (registry + JSON-RPC endpoint)."""
+from __future__ import annotations
+
+import asyncio
+import sys
+import tempfile
+from pathlib import Path
+from types import SimpleNamespace
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+_passed = 0
+_failed = 0
+
+
+def check(name: str, cond: bool, extra: str = "") -> None:
+    global _passed, _failed
+    if cond:
+        _passed += 1
+        print(f"  [PASS] {name}")
+    else:
+        _failed += 1
+        print(f"  [FAIL] {name} {extra}")
+
+
+# --------------------------------------------------------------------------- #
+def test_config_and_roles() -> None:
+    from spider import config
+    from spider.roles import ROLES
+    cfg = config.default_config()
+    check("config has human_in_the_loop", "human_in_the_loop" in cfg)
+    check("config has tool_approval policy", cfg["tool_approval"]["by_category"]["exploit"] == "manual")
+    check("config has kali block", "kali" in cfg and "url" in cfg["kali"])
+    check("config default intensity", cfg["default_intensity"] in config.INTENSITY_LEVELS)
+    check("poc_execution defaults to kali_only", cfg["poc_execution"] == "kali_only")
+    for r in ("orchestrator", "recon", "web_app", "network", "exploitation", "post_exploit", "reporting"):
+        check(f"role '{r}' present", r in ROLES)
+    check("no reverse-engineering roles leaked", "reverse_analyst" not in ROLES)
+
+
+def test_tools_categorised() -> None:
+    from spider.tools import base_tools, tool_catalog
+    bt = base_tools()
+    check("pentest tool 'terminal' present", "terminal" in bt and bt["terminal"].category == "shell")
+    check("pentest tool 'http_request' is web", bt.get("http_request") and bt["http_request"].category == "web")
+    check("cross-platform run_shell present", "run_shell" in bt and bt["run_shell"].category == "shell")
+    check("run_shell is policy-driven (not hard floor)", not bt["run_shell"].requires_approval)
+    check("legacy run_as_admin removed", "run_as_admin" not in bt)
+    check("legacy run_powershell/run_cmd removed", "run_powershell" not in bt and "run_cmd" not in bt)
+    cat = {t["name"]: t for t in tool_catalog()}
+    check("tool_catalog exposes category", cat["terminal"]["category"] == "shell")
+
+
+def test_approval_policy() -> None:
+    from spider import config
+    from spider.db import Database
+    from spider.session import Session
+    db = Database(":memory:")
+    cfg = config.default_config()
+    s = Session("s_t", "t", cfg, db)
+    web = SimpleNamespace(name="http_request", category="web", requires_approval=False)
+    recon = SimpleNamespace(name="kali__nmap_scan", category="recon", requires_approval=False)
+    # The hard-floor mechanism (requires_approval=True => always gated) still exists even
+    # though no built-in tool uses it now; verify it with a synthetic tool.
+    hard = SimpleNamespace(name="synthetic_dangerous", category="recon", requires_approval=True)
+    check("web tool gated by policy (manual)", s.tool_needs_approval(web) is True)
+    check("recon tool auto by policy", s.tool_needs_approval(recon) is False)
+    check("hard-floor tool always gated", s.tool_needs_approval(hard) is True)
+    s.approval_mode = "auto"
+    check("auto mode bypasses everything", s.tool_needs_approval(web) is False)
+    db.close()
+
+
+def _mock_cfg():
+    from spider import config
+    cfg = config.default_config()
+    for mc in cfg["models"].values():
+        mc["provider"] = "mock"
+        mc["model"] = "mock-model"
+    cfg["approval_mode"] = "auto"  # don't block on approvals during the offline run
+    cfg["human_in_the_loop"]["plan_approval"] = "off"  # don't block on plan sign-off
+    return cfg
+
+
+async def test_end_to_end() -> None:
+    from spider import config
+    from spider.session import SessionManager
+    tmp = Path(tempfile.mkdtemp(prefix="spider_smoke_"))
+    cfg = _mock_cfg()
+    cfg["workspace_root"] = str(tmp / "workspaces")
+    cfg["agents_dir"] = str(tmp / "agents")
+    config.CONFIG_DIR = tmp / "config"  # keep the real config untouched
+    mgr = SessionManager(db=__import__("spider.db", fromlist=["Database"]).Database(str(tmp / "spider.db")))
+    sess = mgr.create("smoke", cfg)
+    await sess.start("10.10.10.5", "Authorised lab engagement. No DoS.")
+    # wait for the orchestrator pipeline to finish (bounded)
+    for _ in range(100):
+        if sess.status in ("completed", "stopped", "error"):
+            break
+        await asyncio.sleep(0.05)
+    check("session reached terminal state", sess.status in ("completed", "stopped", "error"), f"(status={sess.status})")
+    check("a plan was produced", len(sess.plan.get("steps", [])) > 0)
+    check("at least one agent ran", len(sess.agents) >= 1)
+    check("orchestrator exists", any(a.role == "orchestrator" for a in sess.agents.values()))
+    check("a finding was recorded", len(sess.findings) >= 1)
+
+    # intensity + interjection
+    check("set_intensity works", sess.set_intensity("stealth") and sess.default_intensity == "stealth")
+    check("reject bad intensity", sess.set_intensity("nope") is False)
+    res = await sess.interject("Focus on the web app first.")
+    check("interjection delivered", "deliver" in res.lower() or "operator" in res.lower() or "active" in res.lower(), f"({res})")
+
+    # report generation (mock writes a report file) — Markdown always, .docx when python-docx is present
+    rep = await sess.generate_report("Keep it short.", "# Title\n## Executive Summary\n## Findings")
+    check("report generated (.md)", bool(rep.get("report")) and Path(rep["path"]).exists())
+    try:
+        import docx  # noqa: F401
+        check("report also produced a .docx", bool(rep.get("docx_path")) and Path(rep["docx_path"]).exists())
+    except ImportError:
+        pass
+
+    # parent-validation handshake: the recon sub-agent should have been validated & closed
+    recon = [a for a in sess.agents.values() if a.role == "recon"]
+    check("a sub-agent ran and was closed via validation", bool(recon) and all(a.status == "done" for a in recon))
+    check("validated sub-agent is marked validated", all(getattr(a, "_validated", False) for a in recon))
+    await sess.shutdown()
+
+
+async def test_validation_and_raw_events() -> None:
+    """The raw LLM output is captured (agent.raw) and a spawned sub-agent passes through
+    'waiting_validation' before its parent closes it (mandatory validation handshake)."""
+    import tempfile
+
+    from spider import config
+    from spider.db import Database
+    from spider.events import E, bus
+    from spider.session import SessionManager
+
+    tmp = Path(tempfile.mkdtemp(prefix="spider_val_"))
+    cfg = _mock_cfg()
+    cfg["workspace_root"] = str(tmp / "workspaces")
+    cfg["agents_dir"] = str(tmp / "agents")
+    config.CONFIG_DIR = tmp / "config"
+    mgr = SessionManager(db=Database(str(tmp / "v.db")))
+    q = bus.subscribe()  # capture the live event stream
+    sess = mgr.create("val", cfg)
+    await sess.start("10.0.0.1", "Authorised lab engagement.")
+    for _ in range(200):
+        if sess.status in ("completed", "stopped", "error"):
+            break
+        await asyncio.sleep(0.05)
+    raw_turns = 0
+    saw_waiting_validation = saw_waiting_subagent = False
+    while not q.empty():
+        ev = q.get_nowait()
+        if ev.type == E.AGENT_RAW:
+            raw_turns += 1
+        if ev.type == E.AGENT_STATUS:
+            st = ev.payload.get("status")
+            saw_waiting_validation = saw_waiting_validation or st == "waiting_validation"
+            saw_waiting_subagent = saw_waiting_subagent or st == "waiting_subagent"
+    bus.unsubscribe(q)
+    check("raw LLM output captured (agent.raw)", raw_turns > 0)
+    check("a sub-agent reached 'waiting_validation'", saw_waiting_validation)
+    check("parent showed 'waiting_subagent'", saw_waiting_subagent)
+    await sess.shutdown()
+
+
+async def test_turn_budget_handoff() -> None:
+    """An agent that hits its turn budget before calling finish has its work summarized by a
+    summarizer (handoff) so findings aren't lost, and a sub-agent is routed to validation."""
+    import tempfile
+
+    from spider import config
+    from spider.db import Database
+    from spider.session import Session
+
+    tmp = Path(tempfile.mkdtemp(prefix="spider_budget_"))
+    cfg = _mock_cfg()
+    cfg["workspace_root"] = str(tmp / "workspaces")
+    cfg["agents_dir"] = str(tmp / "agents")
+    config.CONFIG_DIR = tmp / "config"
+    cfg["models"]["recon"]["max_turns"] = 1  # force exhaustion before finish
+    sess = Session("budget", "t", cfg, Database(str(tmp / "b.db")))
+    await sess.setup()
+    parent = await sess.create_agent("orchestrator", "lead", parent=None)
+    child = await sess.create_agent("recon", "Recon the target", parent=parent)
+    sess.start_agent(child)
+    res = await asyncio.wait_for(sess.wait_for(child), timeout=20)
+    check("exhausted agent got a handoff summary", res.startswith("[REACHED MAX TURN BUDGET"))
+    check("a summarizer was spawned for the handoff",
+          any(a.role == "summarizer" for a in sess.agents.values()))
+    check("exhausted sub-agent routed to validation", child.status == "waiting_validation")
+    await sess.shutdown()
+
+
+async def test_plan_approval_flow() -> None:
+    from spider import config
+    from spider.db import Database
+    from spider.session import Session
+    cfg = config.default_config()
+    cfg["human_in_the_loop"]["plan_approval"] = "once"
+    db = Database(":memory:")
+    s = Session("s_plan", "p", cfg, db)
+    agent = SimpleNamespace(id="a_x")
+    task = asyncio.create_task(s.submit_plan(agent, ["Recon", "Enumerate", "Report"]))
+    # let it register the pending approval
+    for _ in range(40):
+        if s.pending_plan_approvals():
+            break
+        await asyncio.sleep(0.02)
+    pend = s.pending_plan_approvals()
+    check("plan approval requested", len(pend) == 1)
+    if pend:
+        s.resolve_plan_approval(pend[0]["id"], "approve")
+    result = await asyncio.wait_for(task, timeout=2)
+    check("approved plan returns proceed", "APPROVED" in result or "proceed" in result.lower(), f"({result})")
+    db.close()
+
+
+def test_poc_execution_policy() -> None:
+    """PoCs/exploits run in Kali only by default: host command-execution tools are withheld
+    from agents in 'kali_only' mode and kept in 'host' mode. The report agent stays on the host
+    with read/write tools only (no execution)."""
+    from spider import config
+    from spider.db import Database
+    from spider.registry import role_specs
+    from spider.session import Session
+    db = Database(":memory:")
+    host_exec = set(config.HOST_EXEC_TOOLS)
+
+    cfg = config.default_config()  # kali_only
+    s = Session("s_poc1", "t", cfg, db); s.roles = role_specs(cfg)
+    exo = set(s._tools_for_role("exploitation"))
+    check("kali_only: exploitation has no host exec tools", not (exo & host_exec))
+    check("kali_only: exploitation keeps file/web tools", {"read_file", "write_file", "http_request"} <= exo)
+
+    cfg2 = config.default_config(); cfg2["poc_execution"] = "host"
+    s2 = Session("s_poc2", "t", cfg2, db); s2.roles = role_specs(cfg2)
+    exo2 = set(s2._tools_for_role("exploitation"))
+    check("host mode: exploitation keeps host exec tools", host_exec <= exo2)
+
+    rep = set(s._tools_for_role("reporting"))
+    check("reporting (host) has write_file, no exec tools", "write_file" in rep and not (rep & host_exec))
+    db.close()
+
+
+def test_reference_documents() -> None:
+    """Operator reference-document attachments: text extraction (md/unsupported), per-session
+    storage + manifest, and injection into the orchestrator brief (read via read_file)."""
+    from spider import config, docs
+    from spider.db import Database
+    from spider.session import Session
+
+    txt, err = docs.extract_text(b"# Scope\nOnly 10.10.10.5 is in scope. No DoS.", "scope.md")
+    check("md text extracted", bool(txt) and not err)
+    _, e2 = docs.extract_text(b"x", "evil.exe")
+    check("unsupported type reported", "unsupported" in e2.lower())
+    check("safe_name strips path traversal", docs.safe_name("../../etc/passwd") == "passwd")
+
+    tmp = Path(tempfile.mkdtemp(prefix="spider_docs_"))
+    cfg = config.default_config(); cfg["workspace_root"] = str(tmp)
+    db = Database(":memory:")
+    s = Session("s_docs", "t", cfg, db)
+    entry = s.add_upload("scope.md", b"# Rules of Engagement\nIn scope: 10.10.10.5. Off-limits: DoS.")
+    check("upload stored with extracted chars", entry["chars"] > 0 and not entry["error"])
+    check("extracted text sidecar written", (s.workspace / entry["text_path"]).exists())
+    check("upload appears in manifest list", any(u["name"] == "scope.md" for u in s.list_uploads()))
+    block = s._reference_docs_block()
+    check("reference-docs block built", "REFERENCE DOCUMENTS" in block and "Rules of Engagement" in block)
+    check("block points at the readable path", "uploads/text/scope.md.txt" in block)
+    check("remove_upload works", s.remove_upload("scope.md") and not s.list_uploads())
+    db.close()
+
+
+def test_report_docx_and_template() -> None:
+    """The report renderer converts Markdown to a structured .docx, and .docx extraction is
+    heading-aware (so a Word template's structure is preserved for the report agent to follow)."""
+    import tempfile
+
+    from spider import docs
+    try:
+        import docx  # noqa: F401
+        have_docx = True
+    except ImportError:
+        have_docx = False
+
+    md = "# Title\n## Executive Summary\nText with **bold**.\n\n- a bullet\n\n| Col A | Col B |\n| --- | --- |\n| 1 | 2 |\n"
+    out = Path(tempfile.mkdtemp(prefix="spider_docx_")) / "r.docx"
+    ok, err = docs.markdown_to_docx(md, str(out))
+    if have_docx:
+        check("markdown_to_docx produced a .docx", ok and out.exists(), f"({err})")
+        text, e = docs.extract_text(out.read_bytes(), "r.docx")
+        check("docx extraction is heading-aware", "# Title" in text and "## Executive Summary" in text)
+        check("docx round-trips the table", "| Col A | Col B |" in text)
+    else:
+        check("markdown_to_docx degrades gracefully without python-docx", (not ok) and "python-docx" in err)
+
+
+async def test_auth_and_isolation() -> None:
+    """Password hashing, the bootstrap admin, login tokens, and per-user session isolation
+    (the security core of the multi-user feature) — exercised offline against auth + DB."""
+    from spider.auth import Auth, AuthError, hash_password, verify_password
+    from spider.db import Database
+    db = Database(":memory:")
+    auth = Auth(db)
+
+    # password hashing is salted + verifies correctly, rejects wrong passwords
+    h = hash_password("hunter2longpw")
+    check("password verifies", verify_password("hunter2longpw", h))
+    check("wrong password rejected", not verify_password("nope", h))
+    check("two hashes of same pw differ (salt)", hash_password("hunter2longpw") != h)
+
+    # first-run bootstrap admin
+    check("needs_setup before any user", await auth.needs_setup() is True)
+    admin = await auth.create_first_admin("root", "supersecret")
+    check("first admin is admin", admin.is_admin)
+    check("needs_setup false after setup", await auth.needs_setup() is False)
+
+    # second create_first_admin refused; short passwords refused
+    try:
+        await auth.create_first_admin("root2", "supersecret"); check("second bootstrap refused", False)
+    except AuthError:
+        check("second bootstrap refused", True)
+    try:
+        await auth.create_user("bob", "short"); check("short password refused", False)
+    except AuthError:
+        check("short password refused", True)
+
+    # regular user + login token round-trip + revoke on logout
+    alice = await auth.create_user("alice", "alicepass1")
+    tok, u = await auth.login("alice", "alicepass1")
+    check("login returns the user", u.id == alice.id)
+    check("token resolves to user", (await auth.resolve(tok)).username == "alice")
+    await auth.logout(tok)
+    check("logout revokes token", await auth.resolve(tok) is None)
+    try:
+        await auth.login("alice", "wrongpw"); check("bad login rejected", False)
+    except AuthError:
+        check("bad login rejected", True)
+
+    # last-admin guard
+    try:
+        await auth.delete_user(admin.id); check("last admin protected", False)
+    except AuthError:
+        check("last admin protected", True)
+
+    # session isolation at the DB layer
+    await db.save_session("s_alice", "A", "t", "", "created", {}, {"steps": []}, {}, owner=alice.id)
+    await db.save_session("s_admin", "B", "t", "", "created", {}, {"steps": []}, {}, owner=admin.id)
+    alice_ids = {r["id"] for r in await db.list_sessions(owner=alice.id)}
+    all_ids = {r["id"] for r in await db.list_sessions()}
+    check("user sees only own sessions", alice_ids == {"s_alice"})
+    check("admin (owner=None) sees all sessions", all_ids == {"s_alice", "s_admin"})
+    db.close()
+
+
+def test_kali_server() -> None:
+    from fastapi.testclient import TestClient
+    from kali_server.registry import REGISTRY, mcp_tool_list
+    from kali_server.server import app
+    check("kali registry populated", len(REGISTRY) >= 15)
+    tl = mcp_tool_list()
+    check("kali tools carry category meta", all("category" in t["_meta"] for t in tl))
+    check("nmap_scan registered", any(t["name"] == "nmap_scan" for t in tl))
+    c = TestClient(app)
+    r = c.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+    check("kali initialize ok", r.status_code == 200 and r.json()["result"]["serverInfo"]["name"] == "spider-kali")
+    r = c.post("/mcp", json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
+    names = [t["name"] for t in r.json()["result"]["tools"]]
+    check("kali tools/list returns tools", "sqlmap_test" in names and "hydra_bruteforce" in names)
+    check("kali run_poc tool present (PoCs run in Kali)", "run_poc" in names)
+    r = c.post("/mcp", json={"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                             "params": {"name": "nmap_scan", "arguments": {"target": "127.0.0.1", "mode": "ping"}}})
+    res = r.json()["result"]
+    check("kali tools/call returns content", "content" in res and res["content"][0]["type"] == "text")
+    r = c.post("/mcp", json={"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+                             "params": {"name": "does_not_exist", "arguments": {}}})
+    check("kali unknown tool -> isError", r.json()["result"]["isError"] is True)
+
+
+def main() -> int:
+    print("== Spider smoke test ==")
+    print("- config & roles");      test_config_and_roles()
+    print("- tools categorised");   test_tools_categorised()
+    print("- approval policy");     test_approval_policy()
+    print("- poc execution policy"); test_poc_execution_policy()
+    print("- reference documents"); test_reference_documents()
+    print("- report docx/template"); test_report_docx_and_template()
+    print("- auth & isolation");    asyncio.run(test_auth_and_isolation())
+    print("- kali server");         test_kali_server()
+    print("- plan approval flow");  asyncio.run(test_plan_approval_flow())
+    print("- end-to-end (mock)");   asyncio.run(test_end_to_end())
+    print("- validation & raw");    asyncio.run(test_validation_and_raw_events())
+    print("- turn-budget handoff");  asyncio.run(test_turn_budget_handoff())
+    print(f"\n== {_passed}/{_passed + _failed} checks passed ==")
+    return 1 if _failed else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
