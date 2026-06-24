@@ -358,6 +358,16 @@ async def test_auth_and_isolation() -> None:
     all_ids = {r["id"] for r in await db.list_sessions()}
     check("user sees only own sessions", alice_ids == {"s_alice"})
     check("admin (owner=None) sees all sessions", all_ids == {"s_alice", "s_admin"})
+
+    # admin monitoring: SessionManager.list_all surfaces every session WITH the owner's username,
+    # so the admin's UI can label whose engagement each one is (and open/stop any of them).
+    from spider.session import SessionManager
+    mgr = SessionManager(db=db)
+    summaries = {s["id"]: s for s in await mgr.list_all(owner=None)}
+    check("admin list_all sees all sessions", set(summaries) == {"s_alice", "s_admin"})
+    check("list_all labels owner username", summaries["s_alice"]["owner_name"] == "alice")
+    user_view = {s["id"] for s in await mgr.list_all(owner=alice.id)}
+    check("user list_all stays filtered", user_view == {"s_alice"})
     db.close()
 
 
@@ -383,6 +393,13 @@ def test_kali_server() -> None:
     r = c.post("/mcp", json={"jsonrpc": "2.0", "id": 4, "method": "tools/call",
                              "params": {"name": "does_not_exist", "arguments": {}}})
     check("kali unknown tool -> isError", r.json()["result"]["isError"] is True)
+
+    # global concurrency cap: tool subprocesses run under a shared limiter so several users can't
+    # swamp the one container with parallel scans. _limiter() yields an async context manager.
+    from kali_server.tools import _common
+    check("kali parallel cap configured", isinstance(_common._MAX_PARALLEL, int))
+    cm = _common._limiter()
+    check("kali limiter is an async context manager", hasattr(cm, "__aenter__") and hasattr(cm, "__aexit__"))
 
 
 def main() -> int:

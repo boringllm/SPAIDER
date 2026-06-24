@@ -52,6 +52,14 @@ th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--bord
 .session-item.active { background: var(--panel2); border-left: 3px solid var(--accent); }
 .session-item .name { font-weight: 600; padding-right: 18px; overflow-wrap: anywhere; }
 .session-item .meta { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+/* Admin monitoring: a session owned by another user gets a left accent + owner chip. */
+.session-item.other-owner { border-left: 3px solid var(--muted); }
+.sess-owner { font-size: 10px; font-weight: 500; color: var(--muted); background: var(--panel2);
+  border: 1px solid var(--border); border-radius: 10px; padding: 0 6px; white-space: nowrap; }
+/* Live "running" indicator dot next to a session name. */
+.live-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--green);
+  margin-right: 5px; vertical-align: middle; animation: livepulse 1.4s ease-in-out infinite; }
+@keyframes livepulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 .del-btn { position: absolute; top: 8px; right: 8px; color: var(--red); background: none; border: none; cursor: pointer; padding: 0 4px; }
 .del-btn:hover { color: #ff8b82; }
 .sidebar .actions { padding: 8px 10px; border-top: 1px solid var(--border); }

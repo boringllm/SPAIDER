@@ -78,6 +78,7 @@ Spider connects on session start; the Kali tools then appear to those agents as
 | `SPIDER_KALI_TOKEN` | If set, every `/mcp` request must send `Authorization: Bearer <token>`. |
 | `SPIDER_SCOPE` | Comma-separated hosts/CIDRs. Tools **refuse** targets outside it (server-side backstop). |
 | `SPIDER_KALI_WORKDIR` | Working dir for the generic terminal/file tools (default `/root/spider`). |
+| `SPIDER_KALI_MAX_PARALLEL` | Max tool subprocesses running at once across **all** sessions/users sharing this container (default `8`; `0` = unlimited). Excess tool calls **queue** instead of overloading the box. |
 
 > Run this only on an isolated lab/engagement network. It executes real offensive tools. The
 > server is a backstop — Spider also keeps agents in scope via prompts and the approval policy.
@@ -91,6 +92,12 @@ processes. Commands run in their own process group (`start_new_session=True`) so
 the whole tool tree; the compose file runs an init (`init: true`) so killed processes are reaped.
 Control ops (`__list_processes__` / `__kill_process__` / `__kill_session__`) are operator-only — they
 are **not** in `tools/list`, so agents never see them.
+
+**Concurrency cap.** Because one container is shared by every operator, `run`/`run_shell` (in
+`tools/_common.py`) also hold a slot in a global `asyncio.Semaphore` sized by `SPIDER_KALI_MAX_PARALLEL`
+for the lifetime of each tool. When the cap is reached, further tool calls **queue** rather than
+piling more load on the container/target — a backstop that complements the per-session intensity knob
+and the manual kill.
 
 ## Reaching a target on the operator's own host
 Tools run *inside* the container, where `127.0.0.1` is the container itself. To hit a target on the

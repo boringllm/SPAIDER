@@ -55,13 +55,31 @@ async function loadSessions() { state.sessions = await api("/api/sessions"); ren
 function renderSessions() {
   const el = document.getElementById("sessionList");
   if (!state.sessions.length) { el.innerHTML = '<div class="empty">No sessions</div>'; return; }
-  el.innerHTML = state.sessions.map(s => `
-    <div class="session-item ${s.id === state.current ? "active" : ""}" onclick="selectSession('${s.id}')">
+  const me = state.user || {};
+  const isAdmin = me.role === "admin";
+  el.innerHTML = state.sessions.map(s => {
+    const running = s.status === "running";
+    // For an admin, label sessions that belong to OTHER users so they can monitor (and, if needed,
+    // stop) any operator's engagement. The server already lets admins open/stop any session; this is
+    // just the visual cue for whose it is.
+    const others = isAdmin && s.owner && s.owner !== me.id;
+    const ownerTag = others ? `<span class="sess-owner" title="owner">👤 ${esc(s.owner_name || s.owner)}</span>` : "";
+    return `
+    <div class="session-item ${s.id === state.current ? "active" : ""} ${others ? "other-owner" : ""}" onclick="selectSession('${s.id}')">
       <button class="del-btn" title="Delete session" onclick="deleteSession(event,'${s.id}')">✕</button>
-      <div class="name">${esc(s.name)}</div>
+      <div class="name">${running ? '<span class="live-dot" title="running"></span>' : ""}${esc(s.name)} ${ownerTag}</div>
       <div class="meta">${esc(s.status)} · ${esc(s.target || "no target")}</div>
-    </div>`).join("");
+    </div>`;
+  }).join("");
 }
+// Admins monitor every user's session, so keep the list (status + new sessions) fresh in the
+// background. Regular users only see their own sessions and don't need the extra polling.
+function startSessionPoll() {
+  stopSessionPoll();
+  if (!state.user || state.user.role !== "admin") return;
+  state.sessionPoll = setInterval(() => { loadSessions().catch(() => {}); }, 5000);
+}
+function stopSessionPoll() { if (state.sessionPoll) { clearInterval(state.sessionPoll); state.sessionPoll = null; } }
 async function newSession() {
   const name = prompt("Session name:", "engagement-" + new Date().toISOString().slice(0, 16));
   if (name === null) return;
@@ -1255,6 +1273,7 @@ function bootApp(user) {
   document.getElementById("authOverlay").classList.add("hidden");
   applyUserUI(user);
   loadSessions();
+  startSessionPoll();   // admins: keep the all-users session list live
 }
 function applyUserUI(user) {
   document.getElementById("userLabel").textContent = `${user.username} · ${user.role}`;
@@ -1287,6 +1306,7 @@ async function doSetup() {
 }
 async function doLogout() {
   try { await api("/api/auth/logout", "POST", {}); } catch (e) {}
+  stopSessionPoll();
   state.current = null; state.session = null; state.user = null;
   if (state.ws) { try { state.ws.close(); } catch (e) {} }
   document.getElementById("sessionView").classList.add("hidden");

@@ -172,6 +172,13 @@ settings (**Settings → Users**) and can see every session. Add regular users t
 only sees the sessions they create. Passwords are stored hashed (scrypt); login uses an HttpOnly
 cookie.
 
+**Admin live monitoring.** An admin's session list shows **every user's** engagement, labelled with
+the owner's username (👤) and a pulsing dot for the ones that are running; the list refreshes in the
+background so it stays current. The admin can open any session to watch its **live** event stream
+(agent activity, commands, findings) and **Stop** it if it's misbehaving or out of scope — the same
+controls as the owner. Isolation is still enforced server-side: regular users only ever see and
+touch their own sessions.
+
 In **Settings → Models** put your `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`) — or set it in the
 environment and leave the field blank. You can try the whole flow with **provider = mock** and no
 key.
@@ -185,6 +192,10 @@ cd kali_server
 cp .env.example .env            # set SPIDER_KALI_TOKEN + SPIDER_SCOPE
 docker compose up -d            # runs the pulled image on :8765
 ```
+The one container is **shared by all users**. To keep several operators' parallel scans from
+swamping it (or hammering a target), the server caps how many tool processes run at once and
+**queues** the rest — set **`SPIDER_KALI_MAX_PARALLEL`** in `.env` (default **8**; `0` = unlimited).
+This works together with the per-session **intensity** knob and the **Running in Kali** kill panel.
 To build your own (instead of pulling) or hand the image off as a file, see the build / `scripts/share.sh`
 package-and-load workflow in [`kali_server/README.md`](kali_server/README.md).
 
@@ -325,7 +336,8 @@ brief, the tool-approval policy, and (on the Kali side) the `SPIDER_SCOPE` allow
 DoS/destructive actions unless explicitly authorised — the agents are instructed to escalate
 those to you rather than act.
 
-**Accounts.** Spider is multi-user: one admin manages accounts and global settings; every other
-user is isolated to their own sessions (enforced server-side, not just in the UI). Bind the server
-to `127.0.0.1` (the default) unless you intend to expose it; if you do expose it, put it behind
-HTTPS so the login cookie is protected in transit.
+**Accounts.** Spider is multi-user: one admin manages accounts and global settings and can **monitor
+every user's session live and stop any of them**; every other user is isolated to their own sessions
+(enforced server-side, not just in the UI). Bind the server to `127.0.0.1` (the default) unless you
+intend to expose it; if you do expose it, put it behind HTTPS so the login cookie is protected in
+transit.

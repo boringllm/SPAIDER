@@ -1634,16 +1634,24 @@ class SessionManager:
 
     async def list_all(self, owner: str | None = None) -> list[dict]:
         """Session summaries. When ``owner`` is given, only that user's sessions are returned
-        (per-user isolation); admins pass owner=None to list everything."""
+        (per-user isolation); admins pass owner=None to list everything.
+
+        Each summary carries ``owner`` (user id) and ``owner_name`` (username) so the admin's
+        session list can label whose engagement each one is — the admin monitors and can stop
+        any user's session from there."""
         rows = await self.db.list_sessions(owner=owner)
+        # Resolve owner ids -> usernames once (cheap) so the list can show who owns each session.
+        names = {u["id"]: u["username"] for u in await self.db.list_users()}
         out = []
         for r in rows:
             live = self.sessions.get(r["id"])
+            oid = r.get("owner")
             out.append(
                 {
                     "id": r["id"],
                     "name": r["name"],
-                    "owner": r.get("owner"),
+                    "owner": oid,
+                    "owner_name": names.get(oid) or ("—" if oid is None else oid),
                     "target": r["target"],
                     "status": live.status if live else r["status"],
                     "created_at": r["created_at"],

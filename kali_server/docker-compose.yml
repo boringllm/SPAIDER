@@ -22,6 +22,9 @@ services:
       SPIDER_KALI_TOKEN: "${SPIDER_KALI_TOKEN:-}"   # bearer token Spider must send (recommended)
       SPIDER_SCOPE: "${SPIDER_SCOPE:-}"             # comma-separated in-scope hosts/CIDRs
       SPIDER_KALI_WORKDIR: "/root/spider"
+      # Max tool subprocesses running at once across ALL sessions/users (excess calls queue).
+      # Protects the shared container from being swamped by parallel scans. 0 = unlimited.
+      SPIDER_KALI_MAX_PARALLEL: "${SPIDER_KALI_MAX_PARALLEL:-8}"
     # Lets tools inside the container reach a target running on the OPERATOR'S HOST as
     # `host.docker.internal` (Docker Desktop provides it automatically; this mapping adds it on
     # Linux too). Needed when the target is on localhost/127.0.0.1 of the host — inside the

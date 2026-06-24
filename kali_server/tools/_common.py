@@ -8,6 +8,7 @@ loud default, so that 'passive'/'stealth' really are quiet and 'insane' is opt-i
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import ipaddress
 import os
 import shlex
@@ -18,6 +19,30 @@ from . import _procs
 
 MAX_OUTPUT = 80_000          # chars returned to Spider (then Spider clips again for the model)
 DEFAULT_TIMEOUT = 300        # seconds
+
+# ---- global concurrency cap ------------------------------------------------ #
+# How many tool subprocesses may run at once across the WHOLE container (all Spider sessions /
+# users / agents share this one Kali box). Without a cap, several operators each launching heavy
+# scans (nmap + gobuster + nuclei + hydra ...) can spawn dozens of simultaneous processes and
+# overload the container or hammer the target. Excess calls QUEUE on the semaphore instead of
+# piling on. Set SPIDER_KALI_MAX_PARALLEL=0 to disable the cap (unlimited). Default: 8.
+try:
+    _MAX_PARALLEL = int(os.environ.get("SPIDER_KALI_MAX_PARALLEL", "8") or "8")
+except ValueError:
+    _MAX_PARALLEL = 8
+_SEM: asyncio.Semaphore | None = None
+
+
+def _limiter():
+    """Return the shared concurrency limiter as an async context manager. Lazily creates the
+    semaphore on first use (so it binds to the running event loop), or a no-op context when the
+    cap is disabled (SPIDER_KALI_MAX_PARALLEL<=0)."""
+    global _SEM
+    if _MAX_PARALLEL <= 0:
+        return contextlib.nullcontext()
+    if _SEM is None:
+        _SEM = asyncio.Semaphore(_MAX_PARALLEL)
+    return _SEM
 
 INTENSITY_LEVELS = ["passive", "stealth", "normal", "aggressive", "insane"]
 
@@ -115,34 +140,36 @@ async def run(argv: list[str], timeout: int = DEFAULT_TIMEOUT, input_text: str |
 
     The process is launched in its own session/group (``start_new_session=True``) and registered
     in ``_procs`` so the operator can see it and kill it (and so stopping a Spider session can kill
-    the whole tool tree)."""
+    the whole tool tree). It also holds a slot in the global concurrency limiter for its whole
+    lifetime (see ``_limiter``), so the container can't be swamped by parallel scans."""
     shown = label or " ".join(shlex.quote(a) for a in argv)
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *argv,
-            stdin=asyncio.subprocess.PIPE if input_text is not None else None,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            start_new_session=True,
-        )
-    except FileNotFoundError as e:
-        return f"[error] executable not found: {e}"
-    proc_id = _procs.register(proc, shown)
-    try:
-        out, _ = await asyncio.wait_for(
-            proc.communicate(input_text.encode() if input_text is not None else None),
-            timeout=timeout,
-        )
-    except asyncio.TimeoutError:
+    async with _limiter():   # queue here when the container is already at its parallel-tool cap
         try:
-            proc.kill()
-            await proc.wait()
-        except Exception:  # noqa: BLE001
-            pass
-        return f"[cmd] {shown}\n[timeout after {timeout}s — process killed; partial work may have occurred]"
-    finally:
-        killed = _procs.was_killed(proc_id)
-        _procs.deregister(proc_id)
+            proc = await asyncio.create_subprocess_exec(
+                *argv,
+                stdin=asyncio.subprocess.PIPE if input_text is not None else None,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                start_new_session=True,
+            )
+        except FileNotFoundError as e:
+            return f"[error] executable not found: {e}"
+        proc_id = _procs.register(proc, shown)
+        try:
+            out, _ = await asyncio.wait_for(
+                proc.communicate(input_text.encode() if input_text is not None else None),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            try:
+                proc.kill()
+                await proc.wait()
+            except Exception:  # noqa: BLE001
+                pass
+            return f"[cmd] {shown}\n[timeout after {timeout}s — process killed; partial work may have occurred]"
+        finally:
+            killed = _procs.was_killed(proc_id)
+            _procs.deregister(proc_id)
     text = out.decode("utf-8", errors="replace") if out else ""
     if killed:
         return clip(f"[cmd] {shown}\n[KILLED BY OPERATOR — process terminated before completion]\n{text}")
@@ -152,26 +179,28 @@ async def run(argv: list[str], timeout: int = DEFAULT_TIMEOUT, input_text: str |
 async def run_shell(command: str, timeout: int = DEFAULT_TIMEOUT) -> str:
     """Run a raw command line through /bin/sh -c (the escape hatch used by the generic
     run_command tool). Prefer argv-based ``run`` for built-in tools to avoid injection.
-    Registered + group-killable like ``run`` (see its docstring)."""
-    try:
-        proc = await asyncio.create_subprocess_shell(
-            command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-            start_new_session=True,
-        )
-    except FileNotFoundError as e:
-        return f"[error] shell not available: {e}"
-    proc_id = _procs.register(proc, command)
-    try:
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except asyncio.TimeoutError:
+    Registered + group-killable like ``run`` (see its docstring), and bound by the same global
+    concurrency limiter."""
+    async with _limiter():   # queue here when the container is already at its parallel-tool cap
         try:
-            proc.kill()
-        except Exception:  # noqa: BLE001
-            pass
-        return f"[cmd] {command}\n[timeout after {timeout}s — process killed]"
-    finally:
-        killed = _procs.was_killed(proc_id)
-        _procs.deregister(proc_id)
+            proc = await asyncio.create_subprocess_shell(
+                command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+                start_new_session=True,
+            )
+        except FileNotFoundError as e:
+            return f"[error] shell not available: {e}"
+        proc_id = _procs.register(proc, command)
+        try:
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            try:
+                proc.kill()
+            except Exception:  # noqa: BLE001
+                pass
+            return f"[cmd] {command}\n[timeout after {timeout}s — process killed]"
+        finally:
+            killed = _procs.was_killed(proc_id)
+            _procs.deregister(proc_id)
     text = out.decode("utf-8", errors="replace") if out else ""
     if killed:
         return clip(f"[cmd] {command}\n[KILLED BY OPERATOR — process terminated before completion]\n{text}")

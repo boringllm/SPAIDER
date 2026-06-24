@@ -5,9 +5,11 @@
 Then point Spider's config `kali.url` at  http://<kali-host>:8765/mcp
 
 Environment variables:
-    SPIDER_KALI_TOKEN   require this bearer token on every request (recommended)
-    SPIDER_SCOPE        comma-separated hosts/CIDRs; tools refuse targets outside it
-    SPIDER_KALI_WORKDIR working directory for the generic terminal/file tools (default /root/spider)
+    SPIDER_KALI_TOKEN        require this bearer token on every request (recommended)
+    SPIDER_SCOPE             comma-separated hosts/CIDRs; tools refuse targets outside it
+    SPIDER_KALI_WORKDIR      working dir for the generic terminal/file tools (default /root/spider)
+    SPIDER_KALI_MAX_PARALLEL max tool subprocesses running at once across all sessions (default 8;
+                             0 = unlimited). Excess tool calls queue so the container isn't swamped.
 """
 from __future__ import annotations
 
