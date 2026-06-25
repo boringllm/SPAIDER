@@ -259,10 +259,22 @@ async def test_turn_budget_handoff() -> None:
     sess.start_agent(child)
     res = await asyncio.wait_for(sess.wait_for(child), timeout=20)
     check("exhausted agent got a handoff summary", res.startswith("[REACHED MAX TURN BUDGET"))
-    check("a summarizer was spawned for the handoff",
-          any(a.role == "summarizer" for a in sess.agents.values()))
+    summarizers = [a for a in sess.agents.values() if a.role == "summarizer"]
+    check("a summarizer was spawned for the handoff", bool(summarizers))
+    # The summarizer is a transient helper — nobody validates it, so it must close on its own and
+    # never sit in 'waiting_validation' forever.
+    check("summarizer closes done (not stuck awaiting validation)",
+          all(s.status == "done" and s.awaiting_validation is False for s in summarizers))
     check("exhausted sub-agent closes done (not stuck awaiting validation)", child.status == "done")
     check("exhausted sub-agent is not awaiting validation", child.awaiting_validation is False)
+
+    # Re-engaging an EXHAUSTED agent whose budget was NOT raised must NOT spawn a SECOND summarizer
+    # for the same exhaustion (the bug where the summarizer kicked in twice for one exhausted agent).
+    n_summarizers = sum(1 for a in sess.agents.values() if a.role == "summarizer")
+    child.inbox.put_nowait("[Message from operator]: continue")
+    await asyncio.wait_for(child.run_followup(), timeout=20)
+    check("re-engaging an exhausted agent does not summarize it twice",
+          sum(1 for a in sess.agents.values() if a.role == "summarizer") == n_summarizers)
     await sess.shutdown()
 
 

@@ -73,6 +73,9 @@ th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--bord
 .badge.completed, .badge.done { color: var(--accent); border-color: var(--accent); }
 .badge.error { color: var(--red); border-color: var(--red); }
 .badge.stopped, .badge.idle { color: var(--muted); }
+/* Live rounds-left indicator (LLM queries remaining in an agent's turn budget). */
+.rounds { font-size: 9.5px; color: var(--muted); margin-left: 4px; white-space: nowrap; }
+.agent-head .rounds { font-size: 11px; }
 .badge.waiting_approval { color: var(--yellow); border-color: var(--yellow); }
 
 /* ---------- session view ---------- */

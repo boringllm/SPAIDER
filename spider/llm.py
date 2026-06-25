@@ -58,6 +58,41 @@ class LLMError(Exception):
     pass
 
 
+def format_llm_error(e: Exception) -> str:
+    """Render an exception with ALL the detail an operator needs to debug an LLM/connection
+    failure: the exception message PLUS the API's HTTP status and full response body (the
+    "answer back" from the provider — invalid key, rate limit, bad model, etc.), any wrapped
+    cause (e.g. a proxy/connection error), and the traceback. Used both by the LLM connection
+    test (server.py) and by an agent whose live LLM call fails (so the FULL error lands in chat)."""
+    import json as _json
+    import traceback as _tb
+
+    lines = [f"{type(e).__name__}: {e}"]
+    status = getattr(e, "status_code", None)
+    if status is not None:
+        lines.append(f"HTTP status: {status}")
+    body = getattr(e, "body", None)
+    if body is not None:
+        try:
+            lines.append("response body:\n" + (body if isinstance(body, str) else _json.dumps(body, indent=2)))
+        except Exception:  # noqa: BLE001
+            lines.append(f"response body: {body!r}")
+    else:
+        resp = getattr(e, "response", None)
+        if resp is not None:
+            try:
+                lines.append(f"response [{getattr(resp, 'status_code', '?')}]:\n{resp.text}")
+            except Exception:  # noqa: BLE001
+                pass
+    cause = e.__cause__ or e.__context__
+    if cause is not None and cause is not e:
+        lines.append(f"caused by {type(cause).__name__}: {cause}")
+    tb = "".join(_tb.format_exception(type(e), e, e.__traceback__)).strip()
+    if tb:
+        lines.append("traceback:\n" + tb)
+    return "\n".join(lines)
+
+
 def model_caps(model: str) -> dict[str, bool]:
     """What request parameters a given Anthropic model accepts. Drives model-aware
     param building so we never send a parameter that would 400."""

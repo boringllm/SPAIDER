@@ -49,6 +49,13 @@ async function api(path, method = "GET", body) {
 function esc(s) { return String(s == null ? "" : s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
 function truncate(s, n) { s = String(s == null ? "" : s); return s.length > n ? s.slice(0, n) + "…" : s; }
 function agentName(id) { return (state.agents[id] && state.agents[id].name) || id || "system"; }
+// Rounds-left badge text for an agent. A "round" = one query sent to the LLM; rounds left =
+// max_turns - turns. Returns "" when the budget is unknown (e.g. a DB-restored, non-live agent).
+function roundsLeft(a) {
+  const max = a && a.max_turns, used = (a && a.turns) || 0;
+  if (!max || max <= 0) return "";
+  return `${Math.max(0, max - used)} rounds left (${used}/${max})`;
+}
 
 // ----------------------------------------------------------- sessions
 async function loadSessions() { state.sessions = await api("/api/sessions"); renderSessions(); }
@@ -207,7 +214,8 @@ function handleEvent(ev) {
     case "agent.created":
       state.agents[aid] = { id: aid, name: p.name, role: p.role, status: "running",
         parent_id: p.parent, model: p.model, tools: p.tools || [], mcp_servers: p.mcp_servers || [],
-        task: p.task || "", system_prompt: p.system_prompt || "" };
+        task: p.task || "", system_prompt: p.system_prompt || "",
+        turns: p.turns || 0, max_turns: p.max_turns || 0 };
       state.feeds[aid] = state.feeds[aid] || [];
       if (state.selectedAgent === "__all__" && p.role === "orchestrator") state.selectedAgent = aid;
       renderTree();
@@ -215,7 +223,12 @@ function handleEvent(ev) {
       if (state.selectedAgent === aid) renderAgentHead();
       break;
     case "agent.status":
-      if (state.agents[aid]) state.agents[aid].status = p.status;
+      if (state.agents[aid]) {
+        state.agents[aid].status = p.status;
+        // Live turn budget: a "round" is one query sent to the LLM (server increments per LLM call).
+        if (p.turns != null) state.agents[aid].turns = p.turns;
+        if (p.max_turns != null) state.agents[aid].max_turns = p.max_turns;
+      }
       renderTree(); if (state.selectedAgent === aid) renderAgentHead(); break;
     case "agent.token": {
       const kind = p.kind || "text";
@@ -342,6 +355,7 @@ function nodeHtml(a) {
       title="${esc(a.role)}${a.name ? " · " + esc(a.name) : ""}${kids.length ? " · spawned " + kids.length : ""}">
       <span class="role">${esc(a.role)}</span>${nm}
       <span class="badge ${a.status}" style="font-size:9px">${esc(statusLabel(a.status))}</span>
+      ${roundsLeft(a) ? `<span class="rounds" title="rounds = LLM queries left in this agent's turn budget">${esc(roundsLeft(a))}</span>` : ""}
       ${kids.length ? `<span class="kidcount">▸${kids.length}</span>` : ""}
     </div>
     ${kids.length ? `<div class="tree-children">${kids.map(nodeHtml).join("")}</div>` : ""}
@@ -452,7 +466,7 @@ function renderAgentHead() {
   if (!a) { el.className = "agent-head empty"; el.textContent = "Start the session — agents will appear here."; return; }
   el.className = "agent-head";
   el.innerHTML = `
-    <div><span class="role">${esc(a.role)}</span> <span class="muted">${esc(a.name)}</span> <span class="badge ${a.status}">${esc(statusLabel(a.status))}</span></div>
+    <div><span class="role">${esc(a.role)}</span> <span class="muted">${esc(a.name)}</span> <span class="badge ${a.status}">${esc(statusLabel(a.status))}</span>${roundsLeft(a) ? ` <span class="rounds" title="rounds = LLM queries left in this agent's turn budget">${esc(roundsLeft(a))}</span>` : ""}</div>
     <div class="muted" style="font-size:11px">${esc(a.model || "")} · ${(a.tools || []).length} tools${(a.mcp_servers && a.mcp_servers.length) ? " · mcp: " + esc(a.mcp_servers.join(",")) : ""} · $${(a.cost_usd || 0).toFixed(4)}</div>
     ${a.task ? `<div class="task">task: ${esc(truncate(a.task, 300))}</div>` : ""}
     <div class="controls">

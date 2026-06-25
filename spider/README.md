@@ -187,9 +187,18 @@ rebuilds a session (config/plan/findings/cost + restored agent roster) from the 
 - **`_summarize_on_exhaustion`** — on hitting `max_turns` without finishing, spawns a summarizer
   (`Session.handoff_summary_for`) to distil the transcript into a findings handoff; sets it as the
   result and (for sub-agents) routes it through validation so the parent/orchestrator + memory get it.
+  Guarded by the `_exhausted` flag so it runs **at most once per agent** — re-engaging an
+  already-exhausted agent whose budget wasn't raised won't summarize it a second time
+  (`run_followup` clears `_exhausted` only when `_turns < _max_turns()`, i.e. the budget grew).
+- **`_fail(message, detail=…)`** — marks the agent errored and emits the error event. When a live
+  `provider.complete` raises, the loop passes `detail=llm.format_llm_error(e)` so the COMPLETE error
+  (exception + HTTP status + provider response body + traceback) reaches the chat feed, not just a
+  short toast — same renderer as the Settings LLM connection test.
 - **`deliver` / `_drain_inbox`** — operator/parent messages delivered into the next turn.
 - **Status** is set via `_set_status` (`running`, `waiting_llm`, `waiting_subagent`,
-  `waiting_validation`, `waiting_approval`, `summarizing`, `done`, `stopped`, `error`).
+  `waiting_validation`, `waiting_approval`, `summarizing`, `done`, `stopped`, `error`). Each
+  `agent.status` event also carries `{turns, max_turns}` so the UI shows live **rounds-left** per
+  agent — a "round" is one query sent to the LLM (`_turns` increments once per `provider.complete`).
 
 ### `llm.py` — provider abstraction
 Provider-neutral LLM layer. `make_provider(model_config)` returns one of:
@@ -330,7 +339,9 @@ stripped from every agent in `Session._tools_for_role` — exploits run in Kali,
 | **Change the command tool / Kali routing** | `tools/pentest.py` `_h_kali_terminal` (proxies to the Kali MCP `run_command`); it's in `_WORKER_TOOLS` (`roles.py`). | Always runs in Kali; never the host. Edit `KALI_DOWN_MSG` for the no-Kali guidance. |
 | **Let an agent ask the operator a question** | `tools/control.py` `_h_ask_user` (→ `Session.request_input`); UI alert in `static/app.js` `alertOperator` on the `user.request` event. | Blocks for an answer; raises a toast + title flash + desktop notification. |
 | **Change the "did you finish?" nudge** | `agents.Agent._loop` (the `_finish_nudges` branch). | Now offers finish / `ask_user` / keep working. |
-| **Change the turn-budget handoff** | `agents.Agent._summarize_on_exhaustion` + `Session.handoff_summary_for`; the `else` of the `_loop` while. | Summarizer distils findings when `max_turns` is hit without finishing; sub-agents route to validation. |
+| **Change the turn-budget handoff** | `agents.Agent._summarize_on_exhaustion` + `Session.handoff_summary_for`; the `else` of the `_loop` while. | Summarizer distils findings when `max_turns` is hit without finishing; sub-agents route to validation. Runs once per agent (the `_exhausted` flag) — re-engaging an exhausted agent won't re-summarize it. |
+| **Show the full LLM error in chat** | `agents.Agent._fail(detail=…)` fed by `llm.format_llm_error(e)` in `_loop`'s `provider.complete` except. | Emits exception + HTTP status + provider response body + traceback to the conversation feed (`.msg.err`). |
+| **Show live rounds-left per agent** | `agents.Agent._set_status` emits `{turns, max_turns}`; UI `roundsLeft()` in `static/app.js` renders it (`.rounds`). | A "round" = one LLM query (`_turns`++ per `provider.complete`). |
 | **Change how memory reaches agents** | `Session._memory_notes_block` (inlines note content) + `_shared_memory_for`; injected in `create_agent`. | Memory is GIVEN in the prompt, not fetched via `read_file`. |
 | **Master memory (cross-role digest)** | Written in `Session.record_agent_memory` (→ `memory/master.md` + `self.master_memory`); injected by `_master_memory_block` in `create_agent`. | Each finishing agent's result + findings; injected into EVERY new agent. |
 | **Let an agent load a specific memory** | `tools/control.py` `_h_load_memory` (`load_memory` tool) → `Session.read_memory_file`; candidates from `_loadable_memory_files`; attached in `create_agent`. | Agent SELECTS which memory file to pull in full; path-safe. |

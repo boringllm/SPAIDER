@@ -611,7 +611,8 @@ class Session:
             self.id,
             {"role": role, "name": name, "parent": agent.parent_id, "task": task,
              "model": model_config.get("model"), "tools": list(agent.tools.keys()),
-             "system_prompt": agent.system_prompt, "mcp_servers": list(inherited.keys())},
+             "system_prompt": agent.system_prompt, "mcp_servers": list(inherited.keys()),
+             "turns": 0, "max_turns": agent._max_turns()},
             agent_id=agent.id,
         )
         # Surface what this agent started with, in the chat: memory first, then skills.
@@ -1612,6 +1613,9 @@ class Session:
                 "model": a.model_config.get("model"), "tools": list(a.tools.keys()),
                 "task": a.task, "system_prompt": a.system_prompt,
                 "mcp_servers": list(a.mcp_server_defs.keys()),
+                # live turn budget so a reconnecting UI shows rounds-left without waiting for the
+                # next status event (a "round" = one LLM query; see Agent._set_status).
+                "turns": a._turns, "max_turns": a._max_turns(),
             }
             for a in self.agents.values()
         ]

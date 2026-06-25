@@ -7,7 +7,7 @@ import uuid
 from typing import TYPE_CHECKING, Any
 
 from .events import E, bus
-from .llm import BaseProvider, LLMError, Usage, make_provider
+from .llm import BaseProvider, LLMError, Usage, format_llm_error, make_provider
 from .tools.base import Tool, ToolError
 
 if TYPE_CHECKING:
@@ -52,12 +52,19 @@ class Agent:
         self._finished = False
         # Parent-validation handshake: a spawned sub-agent that calls finish is held in
         # "waiting_validation" until its parent accepts it (then _validated=True, status done).
-        self._validated = parent is None  # the root (orchestrator) needs no validation
+        # The root (orchestrator) needs no validation. Helper agents (summarizer / tool_selector)
+        # are transient internal workers — nobody ever calls `validate_agent` on them, so they must
+        # NOT require validation or they'd sit in "waiting_validation" forever.
+        self._validated = parent is None or role in ("summarizer", "tool_selector")
         self._finish_nudges = 0           # times we've nudged this agent to call finish
         self._stop = asyncio.Event()
         self.inbox: "asyncio.Queue[str]" = asyncio.Queue()
         self.is_running = False
         self._turns = 0
+        # Set once this agent has been summarized on hitting its turn budget, so re-engaging an
+        # already-exhausted agent (which keeps its spent budget) doesn't spawn a SECOND summarizer
+        # for the same exhaustion. Cleared by run_followup only if the budget was actually raised.
+        self._exhausted = False
         self._provider: BaseProvider | None = None
         self.last_input_tokens = 0  # size of the last prompt actually sent
         self._compacting = False
@@ -114,9 +121,16 @@ class Agent:
 
     # ---- event helpers ----
     def _set_status(self, status: str) -> None:
-        """Update the agent's status and broadcast an agent.status event to the UI."""
+        """Update the agent's status and broadcast an agent.status event to the UI. The payload
+        carries the live turn budget (`turns` used so far / `max_turns`) so the UI can show how
+        many rounds are LEFT for this agent — a "round" is one query sent to the LLM (self._turns
+        increments once per LLM call in _loop). _set_status fires several times per turn, so the
+        counter updates live."""
         self.status = status
-        bus.emit(E.AGENT_STATUS, self.session.id, {"status": status, "role": self.role, "name": self.name}, agent_id=self.id)
+        bus.emit(E.AGENT_STATUS, self.session.id, {
+            "status": status, "role": self.role, "name": self.name,
+            "turns": self._turns, "max_turns": self._max_turns(),
+        }, agent_id=self.id)
 
     def _emit_message(self, role: str, content: Any) -> None:
         """Emit a chat message event AND persist it to the DB so the discussion feed
@@ -169,6 +183,12 @@ class Agent:
         self._stop.clear()
         self._finished = False
         self._finish_nudges = 0
+        # If the budget was RAISED in Settings since this agent exhausted, there are rounds to run
+        # again — allow a future genuine exhaustion to summarize. If the budget is still spent,
+        # keep `_exhausted` set so the loop's else-branch won't summarize this same exhaustion a
+        # second time (re-engaging never grants a fresh budget).
+        if self._turns < self._max_turns():
+            self._exhausted = False
         return await self._loop()
 
     def _drain_inbox(self) -> None:
@@ -225,7 +245,10 @@ class Agent:
                         self.system_prompt, self.messages, tool_schemas, on_token
                     )
                 except (LLMError, Exception) as e:  # noqa: BLE001
-                    self._fail(f"LLM call failed: {e}")
+                    # Surface the COMPLETE error in chat (status + provider response body +
+                    # traceback), not just the exception string, so the operator sees the full
+                    # "answer back" from the provider and can debug it from the conversation.
+                    self._fail("LLM call failed.", detail=format_llm_error(e))
                     break
                 self._set_status("running")
                 # Emit + persist the FULL raw output of this turn for the raw debug view.
@@ -334,14 +357,24 @@ class Agent:
                 # summarizer distil this agent's transcript into a HANDOFF (findings + state +
                 # what remains) and use that as the result, so its findings still reach the parent
                 # and the shared/master memory.
-                if self.role in ("orchestrator", "summarizer", "tool_selector"):
+                if self._exhausted:
+                    # Already summarized on a PRIOR pass: the budget was spent, a summarizer ran,
+                    # and the agent was then re-engaged (operator "continue" / a parent send-back)
+                    # WITHOUT the budget being raised — so the loop body never ran and we landed
+                    # here again immediately. Re-engaging never grants a fresh budget, so don't
+                    # spawn a SECOND summarizer for the same exhaustion (the bug where the
+                    # summarizer kicked in twice for one exhausted agent); keep the existing result.
+                    self.result = self.result or "Reached maximum turn budget (no rounds remaining)."
+                elif self.role in ("orchestrator", "summarizer", "tool_selector"):
                     # NOT summarized: the orchestrator is the root coordinator (no parent to hand a
                     # summary to — summarizing it is pointless and just spawns a stray agent), and the
                     # helper agents (summarizer / tool_selector) carry no findings and would recurse.
                     # They simply stop at the budget with their current result; the operator can ask
                     # them to continue, which grants a fresh allowance (see run_followup).
+                    self._exhausted = True
                     self.result = self.result or "Reached maximum turn budget."
                 else:
+                    self._exhausted = True
                     self.result = await self._summarize_on_exhaustion(max_turns)
                     # A turn-budget close is an INVOLUNTARY close, not a deliberate `finish`. Don't
                     # park the sub-agent in 'waiting_validation' (a parent that never validates would
@@ -505,8 +538,13 @@ class Agent:
                     lines.append(f"[{role} tool_result{flag}] {b.get('content', '')}")
         return "\n".join(lines)
 
-    def _fail(self, message: str) -> None:
-        """Mark the agent errored, store the message as its result, and emit an error event."""
-        self.result = message
+    def _fail(self, message: str, detail: str | None = None) -> None:
+        """Mark the agent errored, store the message as its result, and emit an error event.
+        When `detail` is given (e.g. the FULL LLM error: HTTP status + the provider's response
+        body + traceback), the complete text is surfaced — the error event carries the whole
+        thing so it renders in the chat feed, not just a truncated toast, so the operator can
+        debug an LLM failure straight from the conversation."""
+        full = message if not detail else f"{message}\n\n{detail}"
+        self.result = full
         self._set_status("error")
-        bus.emit(E.ERROR, self.session.id, {"message": message}, agent_id=self.id)
+        bus.emit(E.ERROR, self.session.id, {"message": full}, agent_id=self.id)
