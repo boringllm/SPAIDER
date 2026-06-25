@@ -1,11 +1,11 @@
-"""Spider Kali MCP server — an MCP-over-HTTP (Streamable-HTTP) endpoint that exposes the
-Kali pentest tools to Spider.
+"""SPAIDER Kali MCP server — an MCP-over-HTTP (Streamable-HTTP) endpoint that exposes the
+Kali pentest tools to SPAIDER.
 
-It speaks the minimal JSON-RPC that Spider's MCP client (`spider/tools/mcp.py`) uses:
+It speaks the minimal JSON-RPC that SPAIDER's MCP client (`spider/tools/mcp.py`) uses:
 ``initialize`` -> ``notifications/initialized`` -> ``tools/list`` -> ``tools/call``. Responses
 are plain JSON (the client also accepts SSE, but JSON is simpler and sufficient).
 
-Run this INSIDE your Kali container, then point Spider's `kali.url` at it
+Run this INSIDE your Kali container, then point SPAIDER's `kali.url` at it
 (default http://<kali-host>:8765/mcp). See README.md.
 
 SECURITY: this server runs real offensive tools. Bind it to a trusted network only, set an
@@ -25,7 +25,7 @@ from .registry import REGISTRY, call_tool, mcp_tool_list
 PROTOCOL_VERSION = "2024-11-05"
 SERVER_INFO = {"name": "spider-kali", "version": "0.1.0"}
 
-app = FastAPI(title="Spider Kali MCP server", version="0.1.0")
+app = FastAPI(title="SPAIDER Kali MCP server", version="0.1.0")
 
 # Optional shared-secret bearer token. When set, every /mcp request must present it.
 _TOKEN = os.environ.get("SPIDER_KALI_TOKEN", "").strip()
@@ -51,7 +51,7 @@ def _authorized(authorization: str | None) -> bool:
 @app.get("/")
 async def index() -> PlainTextResponse:
     """Human-friendly status page listing the registered tools and their availability."""
-    lines = [f"Spider Kali MCP server — {len(REGISTRY)} tools", ""]
+    lines = [f"SPAIDER Kali MCP server — {len(REGISTRY)} tools", ""]
     for entry in mcp_tool_list():
         meta = entry["_meta"]
         status = "ok" if meta["available"] else f"MISSING: {', '.join(meta['missing'])}"
@@ -101,7 +101,7 @@ async def mcp(request: Request, authorization: str | None = Header(default=None)
     if method == "tools/call":
         name = params.get("name", "")
         arguments = params.get("arguments") or {}
-        # Spider tags each call with who launched it ({session, agent, agent_name, tool}) in
+        # SPAIDER tags each call with who launched it ({session, agent, agent_name, tool}) in
         # `_meta`, so the process registry can attribute the running command. Scope it to this task.
         from .tools._procs import CURRENT_META
 

@@ -32,7 +32,7 @@ def _extract_pdf(data: bytes) -> tuple[str, str]:
     try:
         from pypdf import PdfReader
     except ImportError:
-        return "", "PDF support is not installed on the Spider host. Run: pip install pypdf"
+        return "", "PDF support is not installed on the SPAIDER host. Run: pip install pypdf"
     import io
 
     try:
@@ -50,7 +50,7 @@ def _extract_docx(data: bytes) -> tuple[str, str]:
     try:
         import docx  # python-docx
     except ImportError:
-        return "", "Word (.docx) support is not installed on the Spider host. Run: pip install python-docx"
+        return "", "Word (.docx) support is not installed on the SPAIDER host. Run: pip install python-docx"
     import io
 
     try:
@@ -162,7 +162,7 @@ def markdown_to_docx(md_text: str, out_path: str) -> tuple[bool, str]:
         import docx
         from docx.shared import Pt
     except ImportError:
-        return False, "Word (.docx) output needs python-docx on the Spider host. Run: pip install python-docx"
+        return False, "Word (.docx) output needs python-docx on the SPAIDER host. Run: pip install python-docx"
 
     try:
         doc = docx.Document()

@@ -3,14 +3,15 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Spider — Autonomous Penetration Testing</title>
+  <title>SPAIDER — Security Pentester AI Driven: Exploitation and Reconnaissance</title>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
   <!-- Auth gate: shown until the user is authenticated. First run shows 'create admin'. -->
   <div id="authOverlay" class="overlay auth-overlay">
     <div class="auth-card">
-      <h1>🕷 Spider</h1>
+      <h1 title="Security Pentester AI Driven: Exploitation and Reconnaissance">🕷 SPAIDER</h1>
+      <p class="muted" style="margin:-4px 0 8px;font-size:11px">Security Pentester AI Driven: Exploitation and Reconnaissance</p>
       <div id="authLogin" class="hidden">
         <h3>Sign in</h3>
         <label>Username<input id="loginUser" autocomplete="username"
@@ -36,7 +37,7 @@
 
   <div class="app">
     <aside class="sidebar" id="sidebar">
-      <h1>🕷 Spider<br><small>autonomous pentest</small></h1>
+      <h1 title="Security Pentester AI Driven: Exploitation and Reconnaissance">🕷 SPAIDER<br><small>autonomous pentest</small></h1>
       <div class="session-list" id="sessionList"></div>
       <div class="actions user-bar" id="userBar">
         <span id="userLabel" class="muted"></span>
@@ -219,7 +220,7 @@
         </div>
 
         <h3>Kali offensive-tool server</h3>
-        <p class="muted" style="margin:0 0 8px">Spider drives real pentest tools through a Kali container running the
+        <p class="muted" style="margin:0 0 8px">SPAIDER drives real pentest tools through a Kali container running the
           <code>kali_server/</code> MCP server. Enable it and point it at your Kali host; its tools (nmap, sqlmap, hydra…)
           are assigned to the recon/web_app/network/exploitation/post_exploit agents on session start.</p>
         <div class="toolbar">
@@ -241,7 +242,7 @@
           <code>127.0.0.1</code>, <code>host.docker.internal</code>).</p>
         <div class="config-grid">
           <div class="config-role">
-            <h4>Client proxy <span class="muted" style="font-weight:normal">— Spider's own outbound (the LLM API)</span></h4>
+            <h4>Client proxy <span class="muted" style="font-weight:normal">— SPAIDER's own outbound (the LLM API)</span></h4>
             <label class="chk"><input id="clientProxyEnabled" type="checkbox" /> route the control app's LLM calls through the proxy</label>
             <label>proxy URL<input id="clientProxyUrl" type="password" placeholder="http://user:pass@proxy:8080" /></label>
             <label class="wide">no-proxy hosts (one per line)<textarea id="clientProxyNoProxy" rows="3" placeholder="localhost&#10;127.0.0.1"></textarea></label>
@@ -315,7 +316,7 @@
       <section class="settings-page hidden" data-page="tools">
         <h3>Tool-approval policy</h3>
         <p class="muted" style="margin:0 0 8px">Decide what needs your sign-off. For each tool <b>category</b>, choose
-          <b>auto</b> (runs immediately) or <b>manual</b> (the agent pauses for your approval). This is Spider's main
+          <b>auto</b> (runs immediately) or <b>manual</b> (the agent pauses for your approval). This is SPAIDER's main
           safety control. Active only when Approval mode is <b>manual</b>; <code>run_as_admin</code> is always gated.</p>
         <div class="toolbar"><label>Default for unlisted categories
           <select id="toolApprovalDefault"><option value="auto">auto</option><option value="manual">manual</option></select>

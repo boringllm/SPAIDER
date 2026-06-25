@@ -1,7 +1,7 @@
 """Credential-attack and exploitation tools (categories: bruteforce / exploit).
 
 These are the highest-impact tools: credential attacks can lock accounts and are very noisy;
-exploitation can crash or alter the target. They are operator-gated by default in Spider, and
+exploitation can crash or alter the target. They are operator-gated by default in SPAIDER, and
 several have extra guardrails here. Stay strictly in scope and respect intensity."""
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ _POC_INTERPRETERS = {
     description=(
         "Write a proof-of-concept / exploit script INSIDE the Kali container and execute it "
         "there, returning its output. This is the canonical way to run a PoC: PoCs always run in "
-        "the isolated Kali container, never on the Spider host. Provide the script `code`, the "
+        "the isolated Kali container, never on the SPAIDER host. Provide the script `code`, the "
         "`interpreter` (python3 (default), bash, sh, perl, ruby, php, node), optional `args`, and "
         "an optional `target` (validated against scope). HIGH IMPACT — only run validated, "
         "in-scope, minimally-destructive PoCs; never DoS or destroy data without explicit "

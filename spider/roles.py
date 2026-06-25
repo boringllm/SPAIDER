@@ -1,4 +1,4 @@
-"""Agent role definitions for Spider: system prompts and the tool-name list each
+"""Agent role definitions for SPAIDER: system prompts and the tool-name list each
 penetration-testing role may use.
 
 Offensive tooling (Kali MCP server) and any other MCP-backed tools are appended at
@@ -8,7 +8,7 @@ to change how each discipline behaves."""
 from __future__ import annotations
 
 _COMMON = (
-    "You are an autonomous agent in Spider, a system for AUTHORISED, fully automated "
+    "You are an autonomous agent in SPAIDER, a system for AUTHORISED, fully automated "
     "penetration testing. You operate like a tool-using assistant: think, call tools, "
     "observe results, and continue until your task is done. Stay strictly within the "
     "agreed scope (the targets and rules of engagement in your brief). Be rigorous and "
@@ -28,11 +28,11 @@ _AUTH = (
     "their loudest setting by default."
 )
 
-# Execution-environment contract appended to every offensive worker. Spider HARDCODES that
+# Execution-environment contract appended to every offensive worker. SPAIDER HARDCODES that
 # commands run only inside the Kali container — agents never get a host shell.
 _KALI_EXEC = (
     "\n\nEXECUTION ENVIRONMENT (important): ALL shell commands and offensive tools run INSIDE "
-    "the Kali container, NEVER on the Spider host. To run ANY command-line tool — nmap, whatweb, "
+    "the Kali container, NEVER on the SPAIDER host. To run ANY command-line tool — nmap, whatweb, "
     "gobuster, ffuf, sqlmap, nikto, msfvenom, curl, nc, a python/bash PoC, a custom one-liner — "
     "call `kali_terminal` (or a dedicated `kali__<tool>` function if one exists). `kali_terminal` "
     "is ALWAYS available to you; you do NOT have and must not look for a host shell, `run_shell`, "
@@ -184,7 +184,7 @@ EXPLOITATION = (
     "destructive techniques; never run a potentially damaging or DoS-style exploit without "
     "explicit operator approval — escalate via `ask_parent` first. Use the Kali exploitation "
     "tools and run PoCs INSIDE the Kali container (write a PoC and run it with `kali__run_poc`, or "
-    "use `kali__run_command` / `kali__metasploit_run`) — never on the Spider host. Capture proof of "
+    "use `kali__run_command` / `kali__metasploit_run`) — never on the SPAIDER host. Capture proof of "
     "exploitation (commands, output, obtained access) and update the finding to reflect confirmed "
     "impact. If exploitation fails, say so clearly with what you tried."
 )
@@ -206,7 +206,7 @@ POST_EXPLOIT = (
 REPORTER = (
     _COMMON
     + "\n\nROLE: Report Writer. You produce the penetration-test report for the operator. You run "
-    "on the SPIDER HOST (not in Kali) and only read evidence and write the report file — you do "
+    "on the SPAIDER HOST (not in Kali) and only read evidence and write the report file — you do "
     "not execute any tools against targets. Your task message contains the engagement context "
     "(scope, plan, and findings) and, optionally, a TEMPLATE the report must follow and EXTRA "
     "INSTRUCTIONS from the operator.\n"

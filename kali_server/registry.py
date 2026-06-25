@@ -1,10 +1,10 @@
-"""Tool registry for the Spider Kali MCP server.
+"""Tool registry for the SPAIDER Kali MCP server.
 
 Each pentest tool is registered with the ``@tool`` decorator, which records its name, a
 DETAILED description (what it does + the impact of its parameters), a JSON-schema for its
-arguments, an approval CATEGORY (one of the categories Spider understands —
+arguments, an approval CATEGORY (one of the categories SPAIDER understands —
 recon/enum/web/exploit/bruteforce/network/destructive), and the list of Kali binaries it
-needs. The category travels to Spider in the MCP ``tools/list`` metadata so the operator's
+needs. The category travels to SPAIDER in the MCP ``tools/list`` metadata so the operator's
 tool-approval policy can gate the right things.
 
 Add a new tool by writing an ``async def`` handler in one of the modules under ``tools/``
@@ -47,7 +47,7 @@ def tool(name: str, description: str, input_schema: dict, category: str = "enum"
 
 def mcp_tool_list() -> list[dict]:
     """Render the registry as MCP ``tools/list`` entries. ``_meta.category`` is read by
-    Spider's MCP client to assign each tool an approval category; ``_meta.requires`` lets
+    SPAIDER's MCP client to assign each tool an approval category; ``_meta.requires`` lets
     the UI show which Kali binaries back the tool and whether they are installed.
 
     For tools that have a static output filter, a ``raw`` boolean parameter is injected into the
@@ -109,7 +109,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> tuple[str, bool]:
                 f"use a different tool."), True
     arguments = dict(arguments or {})
     # `raw` (agent opt-out of filtering) is a wrapper concern, not a handler arg — pull it out
-    # before dispatch. The global filter toggle rides in the JSON-RPC _meta Spider sends.
+    # before dispatch. The global filter toggle rides in the JSON-RPC _meta SPAIDER sends.
     raw = bool(arguments.pop("raw", False))
     try:
         result = await t.handler(arguments)
@@ -134,7 +134,7 @@ def _maybe_filter(name: str, result: str, raw: bool) -> str:
 
 
 def _control_op(name: str, arguments: dict[str, Any]) -> tuple[str, bool]:
-    """Operator process-monitor operations (called by Spider, never by agents). Results are
+    """Operator process-monitor operations (called by SPAIDER, never by agents). Results are
     returned as JSON text. See ``tools/_procs.py``."""
     import json
 

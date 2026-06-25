@@ -281,7 +281,7 @@ function handleEvent(ev) {
       alertOperator(`${p.agent_name || "An agent"} needs your input`, p.message);
       break;
     case "user.request_resolved": delete state.requests[p.id]; renderRequests(); break;
-    // ---- Spider human-in-the-loop ----
+    // ---- SPAIDER human-in-the-loop ----
     case "plan.approval_request":
       if (p.id) { state.planApprovals[p.id] = p; renderPlanApprovals(); }
       pushFeed(aid, "sys", "plan approval", "the orchestrator is awaiting your sign-off on the plan"); break;
@@ -560,7 +560,7 @@ function alertOperator(title, body) {
   try {
     if (window.Notification) {
       if (Notification.permission === "granted") {
-        new Notification("🕷 Spider — " + title, { body: body.slice(0, 180) });
+        new Notification("🕷 SPAIDER — " + title, { body: body.slice(0, 180) });
       } else if (Notification.permission !== "denied") {
         Notification.requestPermission().catch(() => {});
       }
@@ -647,7 +647,7 @@ async function submitRequest(id, skip) {
   catch (e) { alert(e.message); }
 }
 
-// ---- Spider: plan approval, interjection, intensity ----
+// ---- SPAIDER: plan approval, interjection, intensity ----
 function renderPlanApprovals() {
   const el = document.getElementById("planApprovalWrap"); if (!el) return;
   const list = Object.values(state.planApprovals);
@@ -966,7 +966,7 @@ function renderTools() {
 
 const NUM_KEYS = ["temperature", "top_p", "top_k", "frequency_penalty", "presence_penalty", "seed"];
 
-// Tool-approval policy editor (Spider). One row per category -> auto/manual.
+// Tool-approval policy editor (SPAIDER). One row per category -> auto/manual.
 const TOOL_CATEGORIES = ["control", "filesystem", "shell", "recon", "enum", "web",
                          "exploit", "bruteforce", "destructive", "network", "mcp"];
 function renderToolApproval() {
@@ -994,7 +994,7 @@ function renderConfig() {
   document.getElementById("limMaxChildren").value = lim.max_children_per_agent == null ? 5 : lim.max_children_per_agent;
   document.getElementById("limMaxTotal").value = lim.max_total_agents == null ? 15 : lim.max_total_agents;
   document.getElementById("limMaxDepth").value = lim.max_spawn_depth == null ? 3 : lim.max_spawn_depth;
-  // Human-in-the-loop + Kali + intensity (Spider)
+  // Human-in-the-loop + Kali + intensity (SPAIDER)
   const hitl = c.human_in_the_loop || {};
   document.getElementById("planApproval").value = hitl.plan_approval || "once";
   document.getElementById("blockOnPlan").checked = hitl.block_on_plan_approval !== false;
@@ -1272,7 +1272,7 @@ async function saveConfig() {
   c.limits.max_children_per_agent = Math.max(0, parseInt(document.getElementById("limMaxChildren").value) || 0);
   c.limits.max_total_agents = Math.max(1, parseInt(document.getElementById("limMaxTotal").value) || 15);
   c.limits.max_spawn_depth = Math.max(1, parseInt(document.getElementById("limMaxDepth").value) || 3);
-  // Human-in-the-loop + intensity + Kali (Spider)
+  // Human-in-the-loop + intensity + Kali (SPAIDER)
   c.human_in_the_loop = c.human_in_the_loop || {};
   c.human_in_the_loop.plan_approval = document.getElementById("planApproval").value;
   c.human_in_the_loop.block_on_plan_approval = document.getElementById("blockOnPlan").checked;

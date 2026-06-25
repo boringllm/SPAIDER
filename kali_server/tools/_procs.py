@@ -1,13 +1,13 @@
-"""Running-process registry for the Spider Kali MCP server.
+"""Running-process registry for the SPAIDER Kali MCP server.
 
 Every command launched by a tool (via ``_common.run`` / ``run_shell``) is registered here while
-it runs and deregistered when it exits, tagged with WHO launched it (the Spider session / agent /
+it runs and deregistered when it exits, tagged with WHO launched it (the SPAIDER session / agent /
 tool, carried in the JSON-RPC ``_meta`` the control app sends). This lets the operator:
 
   * SEE what offensive tooling is currently running in the container, per session (an enumeration
     scan can easily overload a target), and
   * KILL a runaway process, and
-  * have Spider kill EVERY process of a session when that session is stopped.
+  * have SPAIDER kill EVERY process of a session when that session is stopped.
 
 Processes are launched in their own session/process-group (``start_new_session=True``) so a kill
 takes down the whole tool tree (``/bin/sh -c`` plus the real tool it spawned), not just the shell.
@@ -70,7 +70,7 @@ def _public(rec: dict, now: float) -> dict:
 
 def list_processes(session: str | None = None) -> list[dict]:
     """Public (JSON-serialisable) snapshot of running processes, optionally filtered to one
-    Spider session. Newest first."""
+    SPAIDER session. Newest first."""
     now = time.time()
     out = [_public(r, now) for r in _PROCS.values() if not session or r["session"] == session]
     return sorted(out, key=lambda r: r["started"], reverse=True)
@@ -109,7 +109,7 @@ def kill_process(proc_id: str) -> dict | None:
 
 
 def kill_session(session: str) -> list[dict]:
-    """Kill EVERY running process of a Spider session (called when the session is stopped).
+    """Kill EVERY running process of a SPAIDER session (called when the session is stopped).
     Returns the list of killed records."""
     killed = []
     for rec in list(_PROCS.values()):

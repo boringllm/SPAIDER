@@ -20,7 +20,7 @@ ToolHandler = Callable[["Agent", dict[str, Any]], Awaitable[str]]
 class Tool:
     """One callable capability exposed to an agent.
 
-    Spider extends ReLive's Tool with a ``category`` (one of config.TOOL_CATEGORIES). The
+    SPAIDER extends ReLive's Tool with a ``category`` (one of config.TOOL_CATEGORIES). The
     category drives the human-in-the-loop tool-approval policy: the operator configures, per
     category, whether a tool runs automatically or must be validated first. ``requires_approval``
     remains a hard floor — a tool that sets it True is ALWAYS gated regardless of policy (reserve

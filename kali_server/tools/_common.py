@@ -1,5 +1,5 @@
 """Shared helpers for the Kali tool handlers: a subprocess runner, output clipping,
-target-safety checks, and the INTENSITY mapping that translates Spider's single intensity
+target-safety checks, and the INTENSITY mapping that translates SPAIDER's single intensity
 knob (passive..insane) into the concrete, very different flags each tool needs.
 
 The intensity is the main safety/loudness control. A tool should ALWAYS derive its timing,
@@ -17,11 +17,11 @@ from urllib.parse import urlparse
 
 from . import _procs
 
-MAX_OUTPUT = 80_000          # chars returned to Spider (then Spider clips again for the model)
+MAX_OUTPUT = 80_000          # chars returned to SPAIDER (then SPAIDER clips again for the model)
 DEFAULT_TIMEOUT = 300        # seconds
 
 # ---- global concurrency cap ------------------------------------------------ #
-# How many tool subprocesses may run at once across the WHOLE container (all Spider sessions /
+# How many tool subprocesses may run at once across the WHOLE container (all SPAIDER sessions /
 # users / agents share this one Kali box). Without a cap, several operators each launching heavy
 # scans (nmap + gobuster + nuclei + hydra ...) can spawn dozens of simultaneous processes and
 # overload the container or hammer the target. Excess calls QUEUE on the semaphore instead of
@@ -34,7 +34,7 @@ _SEM: asyncio.Semaphore | None = None
 
 
 def _subprocess_env():
-    """Environment for a tool subprocess. When Spider sent kali_proxy settings in the JSON-RPC
+    """Environment for a tool subprocess. When SPAIDER sent kali_proxy settings in the JSON-RPC
     ``_meta`` (stashed in ``_procs.CURRENT_META``), inject HTTP(S)_PROXY / ALL_PROXY and NO_PROXY so
     proxy-aware tools (curl, wget, httpx, gospider, nuclei, ...) route through the proxy, with the
     whitelist hosts bypassing it. Returns None to inherit the parent env unchanged (no proxy set).
@@ -123,7 +123,7 @@ def host_of(target: str) -> str:
 
 # ---- optional scope guard -------------------------------------------------- #
 # If SPIDER_SCOPE is set (comma-separated hosts / CIDRs), tools refuse targets outside it.
-# This is a server-side backstop; Spider also keeps agents in scope via prompts/approvals.
+# This is a server-side backstop; SPAIDER also keeps agents in scope via prompts/approvals.
 def _load_scope() -> list[str]:
     raw = os.environ.get("SPIDER_SCOPE", "").strip()
     return [s.strip() for s in raw.split(",") if s.strip()] if raw else []
@@ -159,7 +159,7 @@ async def run(argv: list[str], timeout: int = DEFAULT_TIMEOUT, input_text: str |
     stderr is merged into stdout; the process is killed on timeout. Use this for every tool.
 
     The process is launched in its own session/group (``start_new_session=True``) and registered
-    in ``_procs`` so the operator can see it and kill it (and so stopping a Spider session can kill
+    in ``_procs`` so the operator can see it and kill it (and so stopping a SPAIDER session can kill
     the whole tool tree). It also holds a slot in the global concurrency limiter for its whole
     lifetime (see ``_limiter``), so the container can't be swamped by parallel scans."""
     shown = label or " ".join(shlex.quote(a) for a in argv)

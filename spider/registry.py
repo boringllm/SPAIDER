@@ -3,7 +3,7 @@
 Built-in roles (orchestrator, recon, web_app, network, exploitation, post_exploit,
 reporting, summarizer, tool_selector) cannot be removed. Custom agents can be added/removed;
 they are spawnable by the orchestrator. Custom role definitions persist in
-`<agents_dir>/custom_roles.json`. Add a custom role to extend Spider with a new
+`<agents_dir>/custom_roles.json`. Add a custom role to extend SPAIDER with a new
 pentest discipline (e.g. `cloud`, `mobile`, `wireless`, `social_eng`)."""
 from __future__ import annotations
 

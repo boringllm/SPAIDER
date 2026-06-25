@@ -10,7 +10,7 @@ Design / guarantees:
   * **Static only.** No model calls — just line matching / regex. Deterministic and fast.
   * **Lossless escape hatch.** Filtering NEVER destroys data the agent can't get back: an agent
     can re-run any tool with ``raw=true`` to receive the complete unfiltered output, and the
-    operator can disable filtering globally (Spider Settings → Output filtering). When disabled
+    operator can disable filtering globally (SPAIDER Settings → Output filtering). When disabled
     or ``raw``, ``apply_filter`` is bypassed entirely and the tool output is returned verbatim.
   * **Conservative.** When unsure, keep the line. Tiny outputs (< _MIN_LINES_TO_FILTER lines) and
     error/timeout/killed results are returned untouched. A footer always tells the agent how many

@@ -1,17 +1,17 @@
-# Spider Kali MCP server — a self-contained Kali image with the offensive tools + this MCP
+# SPAIDER Kali MCP server — a self-contained Kali image with the offensive tools + this MCP
 # server, pre-configured so it can be built ONCE and shared. Recipients only install the
-# Spider client and point it at this container; they don't rebuild anything.
+# SPAIDER client and point it at this container; they don't rebuild anything.
 #
 # Build once:     docker build -t spider-kali ./kali_server      (or: scripts/share.sh build)
 # Run:            docker compose -f kali_server/docker-compose.yml up -d
 # Share it:       scripts/share.sh package   ->  spider-kali-image.tar.gz   (docker save+gzip)
 #   recipient:    scripts/share.sh load spider-kali-image.tar.gz  &&  compose up -d
 #
-# Then set Spider's config: "kali": {"enabled": true, "url": "http://<host>:8765/mcp"}.
+# Then set SPAIDER's config: "kali": {"enabled": true, "url": "http://<host>:8765/mcp"}.
 FROM kalilinux/kali-rolling
 
-LABEL org.opencontainers.image.title="Spider Kali MCP server" \
-      org.opencontainers.image.description="Kali offensive toolchain + Spider MCP-over-HTTP server" \
+LABEL org.opencontainers.image.title="SPAIDER Kali MCP server" \
+      org.opencontainers.image.description="Kali offensive toolchain + SPAIDER MCP-over-HTTP server" \
       org.opencontainers.image.source="https://github.com/your-org/spider"
 
 ENV DEBIAN_FRONTEND=noninteractive \

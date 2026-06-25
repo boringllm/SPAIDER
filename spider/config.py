@@ -37,7 +37,7 @@ DEFAULT_PRICING: dict[str, dict[str, float]] = {
 }
 
 # The set of agent roles in the system. Each gets its own model configuration.
-# Spider's roles map to penetration-testing disciplines rather than RE phases.
+# SPAIDER's roles map to penetration-testing disciplines rather than RE phases.
 AGENT_ROLES = [
     "orchestrator",     # pentest lead: scope, plan, delegate, keep the operator informed
     "recon",            # reconnaissance / OSINT / host & service discovery
@@ -74,7 +74,7 @@ DEFAULT_AGENT_SKILLS = {
 TOOL_CATEGORIES = [
     "control",      # agent control / bookkeeping (never gated)
     "filesystem",   # read/write files in the workspace
-    "shell",        # run a command on the Spider host
+    "shell",        # run a command on the SPAIDER host
     "recon",        # passive/active discovery, low impact (whois, dns, nmap -sn)
     "enum",         # service/content enumeration (gobuster, enum4linux, nmap -sV)
     "web",          # active web testing (nikto, sqlmap, dirb, ffuf)
@@ -93,7 +93,7 @@ DEFAULT_INTENSITY = "normal"
 #   "kali_only" — PoCs/exploits run ONLY inside the Kali container (via the Kali tools);
 #                 the host's command-execution tools (run_shell/run_process/terminal) are
 #                 withheld from agents. The host is for orchestration, file I/O, and the report.
-#   "host"      — also allow agents to execute on the Spider host (legacy behaviour).
+#   "host"      — also allow agents to execute on the SPAIDER host (legacy behaviour).
 POC_EXECUTION_MODES = ["kali_only", "host"]
 DEFAULT_POC_EXECUTION = "kali_only"
 # Host command-execution tools confined to the Kali container in "kali_only" mode.
@@ -153,7 +153,7 @@ def _default_model_config(role: str) -> dict[str, Any]:
 
 
 def _default_tool_approval() -> dict[str, Any]:
-    """The customisable tool-approval policy (the heart of Spider's human-in-the-loop).
+    """The customisable tool-approval policy (the heart of SPAIDER's human-in-the-loop).
 
     For each tool the runtime resolves a decision in this order:
       1. tool name in ``always_auto_tools``   -> run without asking
@@ -193,7 +193,7 @@ def default_config() -> dict[str, Any]:
         "agents_dir": str(BASE_DIR / "agents"),
         "models": {role: _default_model_config(role) for role in AGENT_ROLES},
         "agent_skills": deepcopy(DEFAULT_AGENT_SKILLS),
-        # ---- Human-in-the-loop (Spider-specific) -------------------------------
+        # ---- Human-in-the-loop (SPAIDER-specific) -------------------------------
         "human_in_the_loop": {
             # Plan sign-off: "off" = never ask; "once" = approve the first plan before
             # work begins; "on_change" = approve the plan AND every later revision.
@@ -213,7 +213,7 @@ def default_config() -> dict[str, Any]:
         # the host runs no exploit/PoC commands (it handles orchestration, files, reporting).
         "poc_execution": DEFAULT_POC_EXECUTION,
         # ---- Kali offensive-tool server (the kali_server/ MCP-over-HTTP project) -
-        # When enabled, Spider connects to it on session start and assigns its tools
+        # When enabled, SPAIDER connects to it on session start and assigns its tools
         # to the listed roles. Run the server inside your Kali container.
         "kali": {
             "enabled": False,
@@ -226,7 +226,7 @@ def default_config() -> dict[str, Any]:
         # ---- Outbound proxies (separate for the control app vs. the Kali container) -----
         # An authenticated proxy in the form http://user:pass@host:port. They are INDEPENDENT:
         # the client can route through one while Kali doesn't (or vice-versa).
-        #   • client_proxy : the Spider control app uses it for its OUTBOUND connections — chiefly
+        #   • client_proxy : the SPAIDER control app uses it for its OUTBOUND connections — chiefly
         #     the LLM API. Hosts in `no_proxy` connect DIRECTLY (bypass the proxy).
         #   • kali_proxy   : pushed to the Kali container; its tools' subprocesses get HTTP(S)_PROXY
         #     / NO_PROXY env so curl/httpx/gospider/nuclei/wget route through it (raw-socket tools

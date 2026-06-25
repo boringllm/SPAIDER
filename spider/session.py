@@ -94,7 +94,7 @@ class Session:
         self._request_counter = 0
         self.roles: dict[str, dict] = {}
 
-        # ---- Human-in-the-loop state (Spider) ----
+        # ---- Human-in-the-loop state (SPAIDER) ----
         hitl = cfg.get("human_in_the_loop", {}) or {}
         self.plan_approval_mode = hitl.get("plan_approval", "once")   # off | once | on_change
         self.block_on_plan_approval = bool(hitl.get("block_on_plan_approval", True))
@@ -301,7 +301,7 @@ class Session:
 
     def _memory_notes_block(self, notes: list[str], per_note: int = 3000, max_total: int = 9000) -> str:
         """Inline the CONTENT of the workspace memory notes (given to the agent directly, not
-        fetched). Spider injects memory into the prompt so agents never need a host file tool to
+        fetched). SPAIDER injects memory into the prompt so agents never need a host file tool to
         read it; each note is included up to ``per_note`` chars, bounded overall by ``max_total``.
         The full text still lives at ``memory/<name>`` for the rare case an agent wants more."""
         if not notes:
@@ -500,7 +500,7 @@ class Session:
                     "from Kali tools, substitute the host as `host.docker.internal` (keep the same "
                     "port/path), e.g. http://host.docker.internal:PORT. Use that hostname for nmap, "
                     "gobuster, sqlmap, curl, etc. The host-side `http_request` tool (which runs on the "
-                    "Spider host) may still use the original localhost URL."
+                    "SPAIDER host) may still use the original localhost URL."
                 )
             # EXECUTION ENVIRONMENT: in the default "kali_only" mode, all exploits and PoCs must
             # run inside the Kali container — agents have no host command-execution tools.
@@ -511,7 +511,7 @@ class Session:
                     "`kali_terminal` (use it for nmap/whatweb/gobuster/sqlmap/msfvenom/curl/custom "
                     "scripts/one-liners); dedicated `kali__<tool>` functions and `kali__run_poc` are "
                     "also available when the Kali server is connected. You have NO host command-"
-                    "execution tools: never try to run commands, exploits, or PoCs on the Spider host, "
+                    "execution tools: never try to run commands, exploits, or PoCs on the SPAIDER host, "
                     "and do not look for `run_shell`/`terminal`. The host is only for orchestration, "
                     "reading/writing files (notes, evidence), and the final report. If `kali_terminal` "
                     "says Kali is not connected, use `ask_user` to ask the operator to start it (or "
@@ -556,17 +556,23 @@ class Session:
                     "important results; read this first) ===\n\n" + master_block
                 )
             # THEN role-scoped shared memory from earlier agents of this role / ancestor roles,
-            # plus the detailed notes agents wrote to the memory/ folder.
-            mem_text = self._shared_memory_for(role, parent)
-            mem_notes = self._memory_notes()
-            note_block = self._memory_notes_block(mem_notes)
-            if note_block:
-                mem_text = (mem_text + "\n\n" + note_block) if mem_text else note_block
-            if mem_text:
-                system_prompt += (
-                    "\n\n=== SHARED MEMORY for your role/lineage (carries findings and context so you "
-                    "don't need to re-ask) ===\n\n" + mem_text
-                )
+            # plus the detailed notes agents wrote to the memory/ folder. SKIPPED for the reporter:
+            # its report is built from the deduplicated findings dossier (in the brief) plus the
+            # bounded master digest above, so re-injecting the role memory AND every scratch note
+            # here would just restate the same findings several times — the duplication that was
+            # overflowing the reporter's context and making the final LLM call fail. The reporter
+            # can still pull any specific file on demand via load_memory (listed below).
+            if role != "reporting":
+                mem_text = self._shared_memory_for(role, parent)
+                mem_notes = self._memory_notes()
+                note_block = self._memory_notes_block(mem_notes)
+                if note_block:
+                    mem_text = (mem_text + "\n\n" + note_block) if mem_text else note_block
+                if mem_text:
+                    system_prompt += (
+                        "\n\n=== SHARED MEMORY for your role/lineage (carries findings and context so you "
+                        "don't need to re-ask) ===\n\n" + mem_text
+                    )
             # SELECTABLE MEMORY: list every memory file and let the agent pull any it wants in full
             # via `load_memory` (master memory is already injected above; this is for the rest).
             loadable_mem = self._loadable_memory_files()
@@ -773,6 +779,61 @@ class Session:
             lines += [f"  - {a.name} ({a.role}) — {a.status}" for a in agents]
         return "\n".join(lines)
 
+    # severity rank for sorting / dedup (higher = more severe)
+    _SEVERITY_RANK = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0, "informational": 0}
+
+    def _report_findings_dossier(self, per_evidence: int = 1500, max_total: int = 24000) -> str:
+        """A DEDUPLICATED, full-detail dossier of this session's findings — the single authoritative
+        source the report is written from. The same vulnerability reported by several agents (same
+        title + location) collapses to ONE entry (the most severe / most-detailed instance wins), so
+        the reporter sees each finding once instead of the same one echoed across master memory, role
+        memory and notes — the duplication that was overflowing its context. Each unique finding
+        carries its severity, status, location, CWE, description and evidence (evidence capped per
+        finding at ``per_evidence``; the whole block bounded by ``max_total``); the full record always
+        remains at ``findings/<id>.json`` for the rare case the reporter needs more."""
+        if not self.findings:
+            return "(no findings were recorded this session — report that the engagement found nothing of note)"
+        rank = self._SEVERITY_RANK
+        groups: dict[tuple, dict] = {}
+        for f in self.findings.values():
+            d = f.get("data") or {}
+            key = (str(f.get("title", "")).strip().lower(), str(d.get("location", "")).strip().lower())
+            cur = groups.get(key)
+            if cur is None:
+                groups[key] = f
+                continue
+            # keep the better duplicate: higher severity, then more evidence (more detail)
+            cd = cur.get("data") or {}
+            challenger = (rank.get(f.get("severity"), 0), len(str(d.get("evidence", ""))))
+            incumbent = (rank.get(cur.get("severity"), 0), len(str(cd.get("evidence", ""))))
+            if challenger > incumbent:
+                groups[key] = f
+        uniques = sorted(groups.values(), key=lambda f: -rank.get(f.get("severity"), 0))
+        dupes = len(self.findings) - len(uniques)
+        header = f"{len(uniques)} unique finding(s)" + (f" (deduplicated from {len(self.findings)} recorded)" if dupes else "") + ":"
+        lines = [header]
+        budget = max_total
+        for f in uniques:
+            d = f.get("data") or {}
+            desc = str(d.get("description", "")).strip()
+            ev = str(d.get("evidence", "")).strip()
+            if len(ev) > per_evidence:
+                ev = ev[:per_evidence] + f"\n…[evidence truncated — full text in findings/{f['id']}.json]"
+            block = (
+                f"\n### {f.get('title') or '(untitled)'}  [{f.get('severity', '?')}/{f.get('status', '?')}]\n"
+                f"- id: {f['id']}\n"
+                f"- location: {d.get('location') or 'N/A'}\n"
+                + (f"- cwe: {d['cwe']}\n" if d.get("cwe") else "")
+                + (f"- description: {desc}\n" if desc else "")
+                + (f"- evidence:\n{ev}\n" if ev else "")
+            )
+            if budget - len(block) < 0 and len(lines) > 1:
+                lines.append("\n…[further findings omitted to bound context — read findings/<id>.json for the rest]")
+                break
+            lines.append(block)
+            budget -= len(block)
+        return "\n".join(lines)
+
     async def generate_report(self, instructions: str = "", template: str = "") -> dict[str, Any]:
         """Spawn a reporter agent to write the full session report, then emit BOTH a Markdown
         and a Word (.docx) file. When a `template` is given (e.g. text extracted from an operator's
@@ -807,13 +868,20 @@ class Session:
         brief = (
             f"Write the full engagement report for this session and save it to `{rel_path}`.\n\n"
             f"=== SESSION CONTEXT ===\n{self._report_context()}\n\n"
+            f"=== FINDINGS DOSSIER (deduplicated — the authoritative source for the report) ===\n"
+            f"{self._report_findings_dossier()}\n\n"
             f"=== EXTRA INSTRUCTIONS FROM OPERATOR ===\n{instr or '(none)'}\n\n"
             f"{tmpl_block}\n\n"
+            f"Write the report from the FINDINGS DOSSIER and SESSION CONTEXT above — they already "
+            f"contain every unique finding with its evidence, deduplicated. Do NOT bulk-read the "
+            f"memory files (master.md / role_*.md / notes) to rebuild this; that content is already "
+            f"summarised here and re-reading it will overflow your context. Only if a specific "
+            f"finding's evidence was truncated and you genuinely need the rest, read that one "
+            f"`findings/<id>.json`. "
             f"Write valid GitHub-flavoured Markdown — use #/##/### heading levels matching the "
             f"template's hierarchy, and Markdown tables (| col | col |) wherever the template has a "
-            f"table — so it converts cleanly to Word. Pull full detail with your read tools, then "
-            f"`write_file` the complete Markdown report to `{rel_path}` and `finish` with the report "
-            f"text (or a brief confirmation)."
+            f"table — so it converts cleanly to Word. Then `write_file` the complete Markdown report "
+            f"to `{rel_path}` and `finish` with the report text (or a brief confirmation)."
         )
         reporter = await self.create_agent("reporting", brief, parent=self.orchestrator)
         self.start_agent(reporter)

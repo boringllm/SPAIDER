@@ -110,7 +110,7 @@ def ensure_scaffold() -> None:
 # --------------------------------------------------------------------------- #
 # Default skill content (seed only — edit the files in skills/ to customise).
 # --------------------------------------------------------------------------- #
-_MASTER = """# Spider Agent Skills — Master Index
+_MASTER = """# SPAIDER Agent Skills — Master Index
 
 Skills are optional markdown playbooks that augment an agent's system prompt with concrete
 penetration-testing methodology. Assign skills to agents in **Settings → Agents & skills**.

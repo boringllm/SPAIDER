@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""View a Spider session event log as a chat-style web UI (or a terminal timeline).
+"""View a SPAIDER session event log as a chat-style web UI (or a terminal timeline).
 
 Every session records its full live event stream to
 `workspaces/<session_id>/logs/events.jsonl` — one JSON event per line (messages, the
@@ -232,7 +232,7 @@ def serve(log_path: Path, session_id: str, host: str, port: int, open_browser: b
     socketserver.TCPServer.allow_reuse_address = True
     with socketserver.ThreadingTCPServer((host, port), Handler) as httpd:
         url = f"http://{host}:{port}"
-        print(f"Spider log UI (live) serving at {url}  —  Ctrl+C to stop")
+        print(f"SPAIDER log UI (live) serving at {url}  —  Ctrl+C to stop")
         if open_browser:
             import time
             threading.Thread(target=lambda: (time.sleep(0.6), webbrowser.open(url)), daemon=True).start()
@@ -540,7 +540,7 @@ def main() -> int:
     except Exception:  # noqa: BLE001
         pass
     ap = argparse.ArgumentParser(
-        description="View a Spider session log as a chat-style web UI (default) or a terminal timeline (--text)."
+        description="View a SPAIDER session log as a chat-style web UI (default) or a terminal timeline (--text)."
     )
     ap.add_argument("target", nargs="?", help="session id, a workspace dir, or a path to events.jsonl")
     ap.add_argument("--list", action="store_true", help="list sessions that have a log on disk and exit")
@@ -605,7 +605,7 @@ _PAGE_TEMPLATE = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Spider — session chat</title>
+<title>SPAIDER — session chat</title>
 <style>
   :root{
     --bg:#0d1117; --panel:#11161d; --panel2:#161b22; --border:#222b36;
@@ -691,7 +691,7 @@ _PAGE_TEMPLATE = r"""<!DOCTYPE html>
 <body>
 <header>
   <div>
-    <h1>🕷 Spider session <span id="sid"></span></h1>
+    <h1>🕷 SPAIDER session <span id="sid"></span></h1>
     <div class="sub" id="sub"></div>
   </div>
   <div class="stats" id="stats"></div>

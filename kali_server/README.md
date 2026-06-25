@@ -1,19 +1,19 @@
-# Spider Kali MCP server
+# SPAIDER Kali MCP server
 
 A small **MCP-over-HTTP** server that runs **inside your Kali container** and exposes Kali's
-offensive tools to Spider as callable functions. Spider's agents (recon / web_app / network /
+offensive tools to SPAIDER as callable functions. SPAIDER's agents (recon / web_app / network /
 exploitation / post_exploit) connect to it and drive real tools — with carefully described
 parameters and a single **intensity** knob that maps to each tool's real flags.
 
 ```
-Spider (host)  ──MCP/HTTP──►  kali_server (in Kali)  ──subprocess──►  nmap / nikto / sqlmap / hydra / …
+SPAIDER (host)  ──MCP/HTTP──►  kali_server (in Kali)  ──subprocess──►  nmap / nikto / sqlmap / hydra / …
 ```
 
 ## Why a server (and not just SSH)?
 Each tool is wrapped as a **typed function** with a JSON schema and a detailed description, so
 the LLM agents know exactly which parameters exist and what each one does (these tools have very
 different blast radius). Every tool also declares an approval **category** (recon / enum / web /
-exploit / bruteforce / …) that travels to Spider so the operator's tool-approval policy can gate
+exploit / bruteforce / …) that travels to SPAIDER so the operator's tool-approval policy can gate
 the dangerous ones. And the **intensity** (passive → insane) is translated per-tool into safe vs.
 loud flags (nmap `-T1`..`-T5`, thread counts, request rates, hydra parallelism).
 
@@ -37,7 +37,7 @@ tool and whether its binary is installed.
 > First build downloads Kali + the toolchain (several GB, many minutes). You only do this **once** —
 > see "Build once & share" below to distribute the result.
 
-### Build once & share (others only install the Spider client)
+### Build once & share (others only install the SPAIDER client)
 Build the image on one machine, hand the result to teammates as a single file, and they run it
 without rebuilding. The `scripts/share.sh` (Linux/macOS) / `scripts/share.ps1` (Windows) helpers wrap
 the Docker commands:
@@ -54,8 +54,8 @@ scripts/share.sh run             # docker compose up -d
 (Windows: `scripts\share.ps1 build|package|load|run`.) Alternatively push to a registry once
 (`docker tag spider-kali ghcr.io/you/spider-kali && docker push …`) and teammates `docker pull` it.
 
-Teammates need **only Docker + this loaded image + the Spider client** — no Kali install, no apt
-downloads. They point Spider → Settings → Kali at `http://<their-docker-host>:8765/mcp` and go.
+Teammates need **only Docker + this loaded image + the SPAIDER client** — no Kali install, no apt
+downloads. They point SPAIDER → Settings → Kali at `http://<their-docker-host>:8765/mcp` and go.
 
 ### In an existing Kali box (no Docker)
 ```bash
@@ -63,13 +63,13 @@ pip install -r kali_server/requirements.txt
 python -m kali_server.run --host 0.0.0.0 --port 8765
 ```
 
-## Point Spider at it
-In Spider's **Settings → Kali** (or `config/config.json`):
+## Point SPAIDER at it
+In SPAIDER's **Settings → Kali** (or `config/config.json`):
 ```json
 "kali": { "enabled": true, "url": "http://<kali-host>:8765/mcp",
           "assign_roles": ["recon","web_app","network","exploitation","post_exploit"] }
 ```
-Spider connects on session start; the Kali tools then appear to those agents as
+SPAIDER connects on session start; the Kali tools then appear to those agents as
 `kali__nmap_scan`, `kali__sqlmap_test`, etc.
 
 ## Safety / configuration (environment variables)
@@ -81,11 +81,11 @@ Spider connects on session start; the Kali tools then appear to those agents as
 | `SPIDER_KALI_MAX_PARALLEL` | Max tool subprocesses running at once across **all** sessions/users sharing this container (default `8`; `0` = unlimited). Excess tool calls **queue** instead of overloading the box. |
 
 > Run this only on an isolated lab/engagement network. It executes real offensive tools. The
-> server is a backstop — Spider also keeps agents in scope via prompts and the approval policy.
+> server is a backstop — SPAIDER also keeps agents in scope via prompts and the approval policy.
 
 ## Running-process monitor
-Every command a tool launches is tracked in a registry (`tools/_procs.py`), tagged with which Spider
-session/agent/tool started it (Spider sends this in the JSON-RPC `_meta`). This powers Spider's
+Every command a tool launches is tracked in a registry (`tools/_procs.py`), tagged with which SPAIDER
+session/agent/tool started it (SPAIDER sends this in the JSON-RPC `_meta`). This powers SPAIDER's
 **Running in Kali** panel: the operator can see live processes, **kill** a runaway one (e.g. an
 enumeration scan overloading the target), and stopping a session kills all of that session's
 processes. Commands run in their own process group (`start_new_session=True`) so a kill takes down
@@ -100,17 +100,17 @@ piling more load on the container/target — a backstop that complements the per
 and the manual kill.
 
 ## Proxying tool traffic
-Spider can push a **Kali proxy** to the server (Settings → Outbound proxies) so the offensive tools
+SPAIDER can push a **Kali proxy** to the server (Settings → Outbound proxies) so the offensive tools
 route through an authenticated HTTP proxy. It travels in the JSON-RPC `_meta` of each tool call;
 `tools/_common._subprocess_env` then sets `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` (and `NO_PROXY` for
 the whitelist) on the tool subprocess. Proxy-aware tools (curl, wget, httpx, gospider, nuclei, …)
-honour it; raw-socket tools like nmap can't use an HTTP proxy. This is independent of the Spider
+honour it; raw-socket tools like nmap can't use an HTTP proxy. This is independent of the SPAIDER
 control app's own (client) proxy. No container env/restart is needed — it applies per tool call.
 
 ## Reaching a target on the operator's own host
 Tools run *inside* the container, where `127.0.0.1` is the container itself. To hit a target on the
 **operator's host loopback**, use `host.docker.internal` (the compose file maps it via `extra_hosts`
-so it works on Linux too). Spider detects a localhost target and tells the agents this automatically.
+so it works on Linux too). SPAIDER detects a localhost target and tells the agents this automatically.
 
 ## Tools included
 | Category | Tools |
@@ -134,7 +134,7 @@ and drops the rest before the agent sees it — saving the agent's context.
 
 * **Per call:** an agent can pass `raw=true` to any filterable tool to get the COMPLETE unfiltered
   output (the parameter is auto-advertised in the tool's schema).
-* **Globally:** Spider sends the operator's *Settings → Kali → filter tool output* preference in the
+* **Globally:** SPAIDER sends the operator's *Settings → Kali → filter tool output* preference in the
   JSON-RPC `_meta`; when off, `_maybe_filter` returns every tool's output unchanged.
 * **Safe by design:** errors/timeouts/killed runs and tiny outputs are never filtered, and a footer
   always reports how many lines were hidden — a filter can't silently mislead. Tools with already-
@@ -142,8 +142,8 @@ and drops the rest before the agent sees it — saving the agent's context.
   unfiltered. Coverage is verified by `tests/test_filters.py` (run it after editing a filter).
 
 ## Add your own tool
-Adding a tool to the Kali container is four small steps. Spider discovers it automatically (with its
-category and availability) on the next connect — no Spider-side code changes.
+Adding a tool to the Kali container is four small steps. SPAIDER discovers it automatically (with its
+category and availability) on the next connect — no SPAIDER-side code changes.
 
 **1. Install the binary** in the image so it ships with the container. Add the package to the right
 `apt-get install` line in [`Dockerfile`](Dockerfile) (or `pip install` it):
@@ -161,7 +161,7 @@ from ._common import check_scope, require_arg, run, threads
 
 @tool(
     name="my_scanner",            # the agent calls it as kali__my_scanner
-    category="enum",              # one of Spider's TOOL_CATEGORIES — drives the approval policy
+    category="enum",              # one of SPAIDER's TOOL_CATEGORIES — drives the approval policy
     requires=["mynewtool"],       # Kali binaries it needs; a missing one is reported cleanly
     description="What it does and what each parameter changes (be precise about impact/loudness).",
     input_schema={"type": "object",

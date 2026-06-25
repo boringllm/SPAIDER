@@ -1,6 +1,6 @@
 """Multi-user authentication: password hashing, login tokens, and user management.
 
-Spider is single-host but multi-operator. Exactly one bootstrap **admin** account manages
+SPAIDER is single-host but multi-operator. Exactly one bootstrap **admin** account manages
 the rest; every other account is a regular **user** who only sees the pentest sessions they
 created (isolation is enforced in server.py via ``sessions.owner``). This module owns the
 security-sensitive bits:

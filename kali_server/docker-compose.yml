@@ -1,4 +1,4 @@
-# One-command run for the Spider Kali MCP server.
+# One-command run for the SPAIDER Kali MCP server.
 #
 #   cp .env.example .env   &&   edit .env   &&   docker compose up -d
 #
@@ -19,7 +19,7 @@ services:
       - "${SPIDER_KALI_PORT:-8765}:8765"
     environment:
       # Per-deployment secrets/scope — NEVER baked into the shared image.
-      SPIDER_KALI_TOKEN: "${SPIDER_KALI_TOKEN:-}"   # bearer token Spider must send (recommended)
+      SPIDER_KALI_TOKEN: "${SPIDER_KALI_TOKEN:-}"   # bearer token SPAIDER must send (recommended)
       SPIDER_SCOPE: "${SPIDER_SCOPE:-}"             # comma-separated in-scope hosts/CIDRs
       SPIDER_KALI_WORKDIR: "/root/spider"
       # Max tool subprocesses running at once across ALL sessions/users (excess calls queue).

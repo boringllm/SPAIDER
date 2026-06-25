@@ -1,9 +1,9 @@
-"""Spider entrypoint. Starts the local web server and opens the UI in a browser.
+"""SPAIDER entrypoint. Starts the local web server and opens the UI in a browser.
 
 Usage:
     py run.py [--host 127.0.0.1] [--port 8000] [--no-browser] [--reload]
 
-This is the Spider CONTROL UI (a web app — no separate window). The offensive tools run
+This is the SPAIDER CONTROL UI (a web app — no separate window). The offensive tools run
 in a separate Kali container via the `kali_server/` MCP server; enable it in Settings → Kali.
 """
 from __future__ import annotations
@@ -41,7 +41,7 @@ def _open_browser(url: str) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Spider — autonomous penetration-testing web app")
+    parser = argparse.ArgumentParser(description="SPAIDER — autonomous penetration-testing web app")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--no-browser", action="store_true", help="do not auto-open the browser")
@@ -55,7 +55,7 @@ def main() -> None:
 
     banner = (
         "\n" + "=" * 56 + "\n"
-        "  Spider is running.\n"
+        "  SPAIDER is running.\n"
         f"  Open this URL in your browser:  {url}\n"
         "  (this is a web app — there is no separate window)\n"
         "  Press CTRL+C to stop.\n"

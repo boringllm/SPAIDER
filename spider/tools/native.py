@@ -1,6 +1,6 @@
 """Natively-implemented tools: host shell / process execution and file I/O.
 
-These run on the SPIDER host (Windows or Linux) — NOT in the Kali container. Heavy
+These run on the SPAIDER host (Windows or Linux) — NOT in the Kali container. Heavy
 offensive tooling lives in the Kali MCP server; these host tools are for local helper
 work (prep wordlists/payloads, run a generated PoC, read/write files). Command-execution
 is approval-gated by the tool's `category` ("shell"); the operator decides per category
@@ -147,14 +147,14 @@ async def _h_make_dir(agent: "Agent", args: dict[str, Any]) -> str:
 
 
 def native_tools() -> dict[str, Tool]:
-    """All natively-implemented host/file tools, keyed by name (these run on the SPIDER host,
+    """All natively-implemented host/file tools, keyed by name (these run on the SPAIDER host,
     Windows or Linux — not in Kali). They are 'internal' (mandatory) tools and are never
     trimmed by the tool_selector. Gating is policy-driven via each tool's ``category`` (the
     operator decides, per category, what needs validation)."""
     return {
         "run_shell": Tool(
             name="run_shell",
-            description="Execute a command in the Spider host's native shell (PowerShell on "
+            description="Execute a command in the SPAIDER host's native shell (PowerShell on "
             "Windows, bash/sh on Linux). Use for local helper tooling, orchestrating utilities, "
             "and preparing payloads/wordlists. Offensive scans against targets should use the "
             "Kali tools instead.",
@@ -172,7 +172,7 @@ def native_tools() -> dict[str, Tool]:
         ),
         "run_process": Tool(
             name="run_process",
-            description="Launch a binary/executable on the Spider host with optional arguments and "
+            description="Launch a binary/executable on the SPAIDER host with optional arguments and "
             "capture its output. Use to run a local helper tool or a generated PoC.",
             input_schema={
                 "type": "object",

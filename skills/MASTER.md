@@ -1,4 +1,4 @@
-# Spider Agent Skills — Master Index
+# SPAIDER Agent Skills — Master Index
 
 Skills are optional markdown playbooks that augment an agent's system prompt with concrete
 penetration-testing methodology. Assign skills to agents in **Settings → Agents & skills**.

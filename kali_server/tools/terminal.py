@@ -1,7 +1,7 @@
 """Generic terminal & file tools on the Kali host (categories: shell / filesystem).
 
 The escape hatch: when no purpose-built tool fits, the agent can run an arbitrary command in
-Kali. This is powerful and gated as `shell` (operator-approved by default in Spider). Keep a
+Kali. This is powerful and gated as `shell` (operator-approved by default in SPAIDER). Keep a
 persistent working directory so commands chain naturally."""
 from __future__ import annotations
 

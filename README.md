@@ -1,20 +1,21 @@
-# 🕷 Spider — Automatic Modular Pentesting Agent
+# 🕷 SPAIDER — Security Pentester AI Driven: Exploitation and Reconnaissance
 
-Spider is a local web app that runs a **multi-agent LLM penetration test** against authorised
+**SPAIDER** (**S**ecurity **P**entester **AI** **D**riven: **E**xploitation and **R**econnaissance)
+is a local web app that runs a **multi-agent LLM penetration test** against authorised
 targets. A lead **orchestrator** agent plans the engagement and delegates to specialised
 sub-agents — recon, web-app, network, exploitation, post-exploitation, reporting — each running a
-tool-using loop. The offensive tools themselves run inside a **Kali container** that Spider drives
+tool-using loop. The offensive tools themselves run inside a **Kali container** that SPAIDER drives
 over an MCP server, so the agents use real tooling (nmap, nikto, gobuster, ffuf, sqlmap, hydra,
 nuclei, metasploit, …).
 
-Crucially, Spider keeps a **human in the loop**: you can require sign-off on the plan, decide
+Crucially, SPAIDER keeps a **human in the loop**: you can require sign-off on the plan, decide
 exactly which tool categories need your approval, interject at any moment to ask a question or
 change direction, and dial the **intensity** of every tool from passive to insane.
 
-> ⚠️ **Authorised use only.** Spider executes real offensive tooling. Run it solely against systems
+> ⚠️ **Authorised use only.** SPAIDER executes real offensive tooling. Run it solely against systems
 > you own or have explicit written permission to test, on an isolated engagement network.
 
-Spider shares its architecture with the ReLive framework, re-targeted from reverse-engineering to
+SPAIDER shares its architecture with the ReLive framework, re-targeted from reverse-engineering to
 penetration testing.
 
 > 🛠 **Want to customize, extend, or understand the internals?** See the developer & customization
@@ -31,7 +32,7 @@ penetration testing.
 2. [The agents](#the-agents)
 3. [Human-in-the-loop controls](#human-in-the-loop-controls)
 4. [Quick start](#quick-start)
-   - [1. Spider control app](#1-spider-control-app-your-host--windows-or-linux)
+   - [1. SPAIDER control app](#1-spider-control-app-your-host--windows-or-linux)
    - [2. Kali tool server](#2-kali-tool-server-pre-configured-docker-image)
    - [3. Test the Kali connection](#3-test-the-kali-connection)
    - [4. Run an engagement](#4-run-an-engagement)
@@ -40,7 +41,7 @@ penetration testing.
 6. [Project layout](#project-layout)
 7. [Inspecting session logs](#inspecting-session-logs)
 8. [Testing](#testing)
-9. [Customizing & extending Spider](#customizing--extending-spider)
+9. [Customizing & extending SPAIDER](#customizing--extending-spider)
 10. [Safety & scope](#safety--scope)
 
 ---
@@ -49,7 +50,7 @@ penetration testing.
 
 ```
 ┌───────────────────────────────────────────────┐          ┌──────────────────────────────┐
-│  Spider (your host) — FastAPI + web UI        │          │  Kali container              │
+│  SPAIDER (your host) — FastAPI + web UI        │          │  Kali container              │
 │                                               │          │                              │
 │  orchestrator (pentest lead)                  │   MCP/   │  kali_server (MCP-over-HTTP) │
 │    ├─ recon          ┐                        │   HTTP   │    nmap_scan, nikto_scan,    │
@@ -150,15 +151,15 @@ Everything below is configurable in **Settings** and steerable live during a run
 - **PoC execution location** — `poc_execution` (default **`kali_only`**) confines all exploit and
   proof-of-concept execution to the Kali container; agents get no host command-execution tools, and
   PoCs run via `kali__run_poc` (write + run a script in Kali). The host is used only for
-  orchestration, files, and the report. Set it to `host` to also allow execution on the Spider host.
+  orchestration, files, and the report. Set it to `host` to also allow execution on the SPAIDER host.
 
 ---
 
 ## Quick start
 
-### 1. Spider control app (your host — Windows or Linux)
+### 1. SPAIDER control app (your host — Windows or Linux)
 ```bash
-cd Spider
+cd SPAIDER
 python -m venv .venv && . .venv/Scripts/activate      # Windows; use bin/activate on Linux/mac
 pip install -r requirements.txt
 python run.py                                         # opens http://127.0.0.1:8000
@@ -166,7 +167,7 @@ python run.py                                         # opens http://127.0.0.1:8
 The host app runs on **Windows or Linux** — host shell helper commands use PowerShell on Windows
 and bash/sh on Linux automatically. (The offensive tooling always runs in the Kali container.)
 
-**First run — create the administrator.** The first time you open Spider it shows a *Create
+**First run — create the administrator.** The first time you open SPAIDER it shows a *Create
 administrator* screen; pick a username and password. That admin manages all accounts and global
 settings (**Settings → Users**) and can see every session. Add regular users there — each user
 only sees the sessions they create. Passwords are stored hashed (scrypt); login uses an HttpOnly
@@ -186,7 +187,7 @@ way to confirm the key, base URL, model name (and the proxy, if enabled) all wor
 
 **Outbound proxies (optional).** In **Settings → Outbound proxies** you can route traffic through an
 authenticated HTTP proxy `http://user:pass@host:port`. The two proxies are independent:
-- **Client proxy** — the Spider control app's own outbound traffic (chiefly the **LLM API**).
+- **Client proxy** — the SPAIDER control app's own outbound traffic (chiefly the **LLM API**).
 - **Kali proxy** — the offensive tools in the container (curl/httpx/gospider/nuclei/wget via
   `HTTP(S)_PROXY`; raw-socket tools like nmap can't use an HTTP proxy).
 
@@ -195,7 +196,7 @@ Each has a **no-proxy whitelist** (one host per line, e.g. `localhost`, `127.0.0
 
 ### 2. Kali tool server (pre-configured Docker image)
 The offensive tools run in a **pre-configured Kali container**. A published build is on Docker Hub, so
-teammates just pull and run it — only the Spider client needs installing:
+teammates just pull and run it — only the SPAIDER client needs installing:
 ```bash
 docker pull sungyongkim98/spider-kali:latest      # ~1.9 GB, all tools baked in
 cd kali_server
@@ -209,19 +210,19 @@ This works together with the per-session **intensity** knob and the **Running in
 To build your own (instead of pulling) or hand the image off as a file, see the build / `scripts/share.sh`
 package-and-load workflow in [`kali_server/README.md`](kali_server/README.md).
 
-Then in Spider **Settings → Kali**: tick *enable*, set the URL to `http://<kali-host>:8765/mcp` (and
+Then in SPAIDER **Settings → Kali**: tick *enable*, set the URL to `http://<kali-host>:8765/mcp` (and
 the same `SPIDER_KALI_TOKEN` if you set one), Save. The Kali tools now appear to the offensive agents
 as `kali__nmap_scan`, `kali__sqlmap_test`, `kali__run_poc`, etc.
 
 > **Targets on your own machine (localhost/127.0.0.1).** The offensive tools run *inside* the Kali
 > container, where `127.0.0.1` is the container itself — a target on your host's loopback is reached
-> as **`host.docker.internal`** instead (e.g. `http://host.docker.internal:8881`). Spider detects a
+> as **`host.docker.internal`** instead (e.g. `http://host.docker.internal:8881`). SPAIDER detects a
 > host-local target and tells the agents to do this automatically; the bundled `docker-compose.yml`
 > maps `host.docker.internal` so it also works on Linux hosts.
 
 ### 3. Test the Kali connection
-Before starting an engagement, confirm Spider can actually reach the container: in **Settings → Kali**
-click **Test connection**. Spider opens a throwaway MCP client against the URL **currently typed in
+Before starting an engagement, confirm SPAIDER can actually reach the container: in **Settings → Kali**
+click **Test connection**. SPAIDER opens a throwaway MCP client against the URL **currently typed in
 the box** (no need to save first), runs the handshake, and reports the result inline:
 
 - ✓ **connected — N tools (nmap_scan, nikto_scan, …)** — the container is up and the tools are
@@ -251,10 +252,10 @@ and a Word (`.docx`) file**, downloadable from the result dialog and saved under
 ## Tools
 
 Every tool declares a **category** that drives the tool-approval policy. There are two layers: the
-**internal tools** built into Spider (host-side), and the **Kali tools** served by `kali_server/`
+**internal tools** built into SPAIDER (host-side), and the **Kali tools** served by `kali_server/`
 (they appear to the offensive agents as `kali__<name>`).
 
-### Internal tools (built into Spider, run on the host)
+### Internal tools (built into SPAIDER, run on the host)
 
 | Category | Tools | What they do |
 |---|---|---|
@@ -281,7 +282,7 @@ and WAF fingerprinting — the surface-mapping and attack steps a modern web/API
 
 Each Kali tool has a detailed parameter schema and maps the **intensity** knob to real flags. Add
 your own in minutes by decorating an async handler (see [`kali_server/README.md`](kali_server/README.md)) —
-it appears to Spider automatically with its category and availability.
+it appears to SPAIDER automatically with its category and availability.
 
 **Output filtering (less noise for the agents).** Every offensive tool's output is statically
 filtered down to its notable findings (open ports, found paths, vulns, creds, records, params…)
@@ -335,7 +336,7 @@ outputs — for debugging. It's a single self-contained HTML file (no dependenci
 python tests/smoke_test.py     # no keys / no Kali needed (uses the Mock provider)
 ```
 
-## Customizing & extending Spider
+## Customizing & extending SPAIDER
 Most things are configurable from the UI (**Settings**) without touching code:
 
 - **Add an agent discipline** (e.g. `cloud`, `mobile`, `wireless`) — Settings → Agents & skills.
@@ -352,12 +353,12 @@ The Kali tool server has its own guide: [`kali_server/README.md`](kali_server/RE
 ---
 
 ## Safety & scope
-Spider is built for authorised engagements. Keep agents in scope via the rules-of-engagement
+SPAIDER is built for authorised engagements. Keep agents in scope via the rules-of-engagement
 brief, the tool-approval policy, and (on the Kali side) the `SPIDER_SCOPE` allow-list. Avoid
 DoS/destructive actions unless explicitly authorised — the agents are instructed to escalate
 those to you rather than act.
 
-**Accounts.** Spider is multi-user: one admin manages accounts and global settings and can **monitor
+**Accounts.** SPAIDER is multi-user: one admin manages accounts and global settings and can **monitor
 every user's session live and stop any of them**; every other user is isolated to their own sessions
 (enforced server-side, not just in the UI). Bind the server to `127.0.0.1` (the default) unless you
 intend to expose it; if you do expose it, put it behind HTTPS so the login cookie is protected in

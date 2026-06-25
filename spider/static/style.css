@@ -299,7 +299,7 @@ body.col-resizing { cursor: col-resize; user-select: none; }
   .agent-tree, .tree-resizer { display: none; }
 }
 
-/* ---- Spider human-in-the-loop additions ---- */
+/* ---- SPAIDER human-in-the-loop additions ---- */
 .hdr-intensity { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
 .hdr-intensity select { padding: 2px 4px; }
 .hdr-bypass { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); cursor: pointer; }

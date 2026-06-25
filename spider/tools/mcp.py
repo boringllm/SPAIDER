@@ -4,7 +4,7 @@ Supports two transports:
   * stdio  — spawn a subprocess, exchange newline-delimited JSON-RPC.
   * http   — POST JSON-RPC to a Streamable-HTTP endpoint (json or SSE response).
 
-Used to integrate external MCP servers — chiefly the Spider Kali offensive-tool server.
+Used to integrate external MCP servers — chiefly the SPAIDER Kali offensive-tool server.
 Tools are discovered dynamically via `tools/list`, so no tool names are
 hard-coded. Connection failures are non-fatal: the tools simply become
 unavailable and a warning is logged.
@@ -81,7 +81,7 @@ class MCPClient:
             raise ToolError("http transport requires 'url'")
         self._http = httpx.AsyncClient(base_url="", timeout=120.0)
         self._url = url
-        # Auth headers sent on every request. A bearer ``token`` (used by the Spider Kali
+        # Auth headers sent on every request. A bearer ``token`` (used by the SPAIDER Kali
         # server's SPIDER_KALI_TOKEN) is the common case; arbitrary ``headers`` are also
         # supported for other MCP servers.
         self._extra_headers: dict[str, str] = {}
@@ -110,7 +110,7 @@ class MCPClient:
         """Invoke one MCP tool and flatten its content blocks to text. Raises ToolError if
         the server marks the result as an error. This is what each wrapped Tool's handler calls.
 
-        ``meta`` is attached as JSON-RPC ``_meta`` — the Spider Kali server uses it to attribute a
+        ``meta`` is attached as JSON-RPC ``_meta`` — the SPAIDER Kali server uses it to attribute a
         running process to the session/agent/tool that launched it (for the process monitor)."""
         params: dict[str, Any] = {"name": name, "arguments": arguments}
         if meta:
@@ -255,7 +255,7 @@ def build_mcp_tools(client: MCPClient, prefix: str) -> dict[str, Tool]:
     name to avoid collisions (e.g. kali__nmap_scan).
 
     The approval-policy CATEGORY for each tool is taken from the server-supplied metadata
-    (``_meta.category`` or ``annotations.category``) when present — the Spider Kali server
+    (``_meta.category`` or ``annotations.category``) when present — the SPAIDER Kali server
     tags every tool with one of config.TOOL_CATEGORIES (recon/enum/web/exploit/bruteforce/…).
     Tools that declare no category get "mcp", which the policy resolves via its `default`
     decision (so unknown remote tools are gated unless the operator opts them in)."""

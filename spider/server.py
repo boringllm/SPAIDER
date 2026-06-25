@@ -22,7 +22,7 @@ from .session import SessionManager
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
-app = FastAPI(title="Spider", version="0.1.0")
+app = FastAPI(title="SPAIDER", version="0.1.0")
 manager = SessionManager()
 auth = Auth(manager.db)
 
@@ -84,7 +84,7 @@ def require_admin(request: Request) -> User:
 
 def _set_login_cookie(response: Response, token: str) -> None:
     """Attach the login-token cookie: HttpOnly so JS can't read it, SameSite=Lax. Secure is
-    left off because Spider is served over local http; enable it behind https."""
+    left off because SPAIDER is served over local http; enable it behind https."""
     response.set_cookie(
         auth_mod.COOKIE_NAME, token, httponly=True, samesite="lax",
         max_age=auth_mod.TOKEN_TTL, path="/",
@@ -185,7 +185,7 @@ class LLMTest(BaseModel):
     params: dict[str, Any] | None = None
 
 
-# ---- Spider human-in-the-loop request models ----
+# ---- SPAIDER human-in-the-loop request models ----
 class PlanDecision(BaseModel):
     decision: str = "approve"          # approve | reject | edit
     feedback: str = ""                 # operator notes (esp. for reject/edit)
@@ -395,9 +395,9 @@ async def test_llm(body: LLMTest, admin: User = Depends(require_admin)) -> dict:
     try:
         provider = make_provider(mc)
         resp = await provider.complete(
-            "You are a connectivity check for the Spider pentest tool. Reply with one short, friendly sentence.",
+            "You are a connectivity check for the SPAIDER pentest tool. Reply with one short, friendly sentence.",
             [{"role": "user", "content": [{"type": "text",
-              "text": "Hello! This is a connection test from Spider — please reply with a brief greeting."}]}],
+              "text": "Hello! This is a connection test from SPAIDER — please reply with a brief greeting."}]}],
             [],
         )
         reply = (resp.text or "").strip()

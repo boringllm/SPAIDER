@@ -1,4 +1,4 @@
-"""Offline smoke test for Spider. No API keys or Kali needed — uses the Mock LLM provider
+"""Offline smoke test for SPAIDER. No API keys or Kali needed — uses the Mock LLM provider
 and FastAPI's TestClient. Run:  python tests/smoke_test.py
 
 Covers: config schema, pentest roles, categorised tools, the tool-approval policy, the
@@ -504,6 +504,52 @@ def test_report_docx_and_template() -> None:
         check("markdown_to_docx degrades gracefully without python-docx", (not ok) and "python-docx" in err)
 
 
+async def test_reporter_dedup_dossier() -> None:
+    """The reporter is fed a DEDUPLICATED findings dossier (the same vuln reported by several
+    agents collapses to one entry, keeping the most severe / most-detailed instance) and is NOT
+    re-injected with the role-memory + notes blocks — the duplication that was overflowing its
+    context. Distinct findings are all kept."""
+    import tempfile
+
+    from spider import config
+    from spider.db import Database
+    from spider.session import Session
+
+    tmp = Path(tempfile.mkdtemp(prefix="spider_dossier_"))
+    cfg = _mock_cfg()
+    cfg["workspace_root"] = str(tmp / "workspaces")
+    cfg["agents_dir"] = str(tmp / "agents")
+    config.CONFIG_DIR = tmp / "config"
+    sess = Session("dossier", "t", cfg, Database(str(tmp / "d.db")))
+    await sess.setup()
+    orch = await sess.create_agent("orchestrator", "lead", parent=None)
+    a1 = await sess.create_agent("web_app", "scan", parent=orch)
+    a2 = await sess.create_agent("network", "scan", parent=orch)
+    # same vuln (title + location) reported twice — a2's is more severe + more detailed
+    await sess.add_finding("f_1", a1, "SQL Injection", "medium", "candidate",
+                           {"location": "/login", "evidence": "short", "description": "maybe"})
+    await sess.add_finding("f_2", a2, "sql injection", "high", "confirmed",
+                           {"location": "/login", "evidence": "PROOF: ' OR 1=1-- dumped users table", "description": "confirmed"})
+    # a genuinely different finding
+    await sess.add_finding("f_3", a1, "XSS", "low", "candidate", {"location": "/search", "evidence": "alert(1)"})
+
+    dossier = sess._report_findings_dossier()
+    check("dossier deduplicates the same finding", dossier.count("/login") == 1)
+    check("dossier keeps the distinct finding", "XSS" in dossier and "/search" in dossier)
+    check("dossier reports it deduplicated 3 -> 2", "2 unique finding(s)" in dossier and "from 3 recorded" in dossier)
+    check("dedup kept the more severe/detailed instance", "PROOF:" in dossier and "high/confirmed" in dossier)
+
+    # the reporter must NOT get the role-memory / notes block injected (it duplicates the dossier)
+    sess.role_memory.setdefault("orchestrator", []).append("orchestrator narrative memory")
+    reporter = await sess.create_agent("reporting", "write the report", parent=orch)
+    check("reporter prompt has no duplicated SHARED MEMORY block",
+          "SHARED MEMORY for your role/lineage" not in reporter.system_prompt)
+    worker = await sess.create_agent("web_app", "more scanning", parent=orch)
+    check("a normal worker still gets SHARED MEMORY",
+          "SHARED MEMORY for your role/lineage" in worker.system_prompt)
+    await sess.shutdown()
+
+
 async def test_auth_and_isolation() -> None:
     """Password hashing, the bootstrap admin, login tokens, and per-user session isolation
     (the security core of the multi-user feature) — exercised offline against auth + DB."""
@@ -613,7 +659,7 @@ def test_kali_server() -> None:
 
 
 def main() -> int:
-    print("== Spider smoke test ==")
+    print("== SPAIDER smoke test ==")
     print("- config & roles");      test_config_and_roles()
     print("- tools categorised");   test_tools_categorised()
     print("- approval policy");     test_approval_policy()
@@ -621,6 +667,7 @@ def main() -> int:
     print("- poc execution policy"); test_poc_execution_policy()
     print("- reference documents"); test_reference_documents()
     print("- report docx/template"); test_report_docx_and_template()
+    print("- reporter dedup dossier"); asyncio.run(test_reporter_dedup_dossier())
     print("- auth & isolation");    asyncio.run(test_auth_and_isolation())
     print("- kali server");         test_kali_server()
     print("- plan approval flow");  asyncio.run(test_plan_approval_flow())

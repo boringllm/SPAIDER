@@ -1,6 +1,7 @@
-# Spider — Developer & Customization Guide (`spider/` package)
+# SPAIDER — Developer & Customization Guide (`spider/` package)
 
-This document is the deep reference for the **Spider control app** — the FastAPI + WebSocket +
+This document is the deep reference for the **SPAIDER control app** (**S**ecurity **P**entester
+**AI** **D**riven: **E**xploitation and **R**econnaissance) — the FastAPI + WebSocket +
 vanilla-JS + SQLite application that lives in this `spider/` package. It explains the architecture,
 every module and its key functions, the data/event flow, and — most importantly — a
 **customization cookbook** that tells you *exactly which file and function to edit* for each thing
@@ -8,9 +9,9 @@ you might want to change.
 
 - New user / operator? Start with the top-level [`../README.md`](../README.md).
 - Want the offensive-tool server internals? See [`../kali_server/README.md`](../kali_server/README.md).
-- This file = "I want to change/extend how Spider itself works."
+- This file = "I want to change/extend how SPAIDER itself works."
 
-> ⚠️ Authorised security testing only. Spider drives real offensive tooling. Keep changes (and
+> ⚠️ Authorised security testing only. SPAIDER drives real offensive tooling. Keep changes (and
 > agents) within scope.
 
 ---
@@ -38,7 +39,7 @@ you might want to change.
 
 ## 1. Big picture
 
-Spider runs a **lead orchestrator LLM agent** that plans an engagement and spawns specialised
+SPAIDER runs a **lead orchestrator LLM agent** that plans an engagement and spawns specialised
 **sub-agents** (recon, web_app, network, exploitation, post_exploit, reporting), each running a
 provider-neutral, tool-using loop. Offensive tools execute in a **Kali container** reached over
 MCP-over-HTTP; local/host tools (file I/O, HTTP repeater, notes) run on the operator's host. A
@@ -162,6 +163,12 @@ Reports & docs:
 - **`generate_report`** — spawns the reporter agent, writes the `.md`, then renders a `.docx` via
   `docs.markdown_to_docx`; honours an exact-structure template and extra instructions.
 - **`_report_context`** — the factual session snapshot fed to the reporter.
+- **`_report_findings_dossier`** — the DEDUPLICATED, full-detail findings dossier that is the
+  authoritative source for the report. Collapses duplicates by (title, location) keeping the most
+  severe / most-detailed instance; evidence capped per finding, block bounded overall. The reporter
+  writes from this instead of re-reading every memory file (which restated the same findings and
+  overflowed its context). `create_agent` also skips the role-memory + notes injection for the
+  reporting role for the same reason.
 - **Uploads:** `add_upload`/`list_uploads`/`remove_upload`/`_reference_docs_block` — operator
   reference documents (extracted text injected into the orchestrator brief).
 
@@ -170,7 +177,7 @@ Run control & persistence: `start`, `resume`, `stop`, `shutdown`, `_monitor`, `s
 rebuilds a session (config/plan/findings/cost + restored agent roster) from the DB after a restart.
 
 ### `agents.py` — the agent loop
-`Agent` is one LLM worker. `Agent._loop` is the heart of Spider's behaviour.
+`Agent` is one LLM worker. `Agent._loop` is the heart of SPAIDER's behaviour.
 
 - **`run` / `run_followup`** — start the loop fresh, or resume an idle agent after it was prodded
   (operator message / send-back validation).
@@ -203,7 +210,7 @@ rebuilds a session (config/plan/findings/cost + restored agent roster) from the 
 ### `llm.py` — provider abstraction
 Provider-neutral LLM layer. `make_provider(model_config)` returns one of:
 - **`AnthropicProvider`**, **`OpenAIProvider`** — real APIs; build params from the model config
-  (model, keys, base_url, temperature, max_tokens, thinking, etc.), translate Spider's message/tool
+  (model, keys, base_url, temperature, max_tokens, thinking, etc.), translate SPAIDER's message/tool
   format, stream tokens, and return an `LLMResponse`.
 - **`MockProvider`** — drives the entire pipeline offline (plan → spawn recon → load skill → store
   finding → tool → validate sub-agent → finish). **Keep it working when you change roles/tools** —
@@ -322,19 +329,19 @@ stripped from every agent in `Session._tools_for_role` — exploits run in Kali,
 | **Change how a built-in agent thinks** | `roles.py` (its prompt fragments) **or** `config/agents/<role>/system.md` (override). | Folder override wins; see `agentdefs.load_def`. |
 | **Change a built-in agent's tools** | `roles.py` tool-name list for that role. | Names must exist in `registry.all_tool_names()`. |
 | **Add a host-side tool** | `tools/custom.py`: write an `async def _h_x(agent, args)` and register a `Tool(...)` in `custom_tools()` with a `category`. | Appears automatically; respects approval policy. |
-| **Add a Kali offensive tool** | `../kali_server/tools/*.py` (decorate an async handler, set its `_meta.category`) + install its binary in `../kali_server/Dockerfile` + import in `tools/__init__.py`. | Surfaces in Spider as `kali__<name>` via `tools/mcp.build_mcp_tools`. Full recipe (incl. a filter): [`kali_server/README.md`](../kali_server/README.md) "Add your own tool". |
+| **Add a Kali offensive tool** | `../kali_server/tools/*.py` (decorate an async handler, set its `_meta.category`) + install its binary in `../kali_server/Dockerfile` + import in `tools/__init__.py`. | Surfaces in SPAIDER as `kali__<name>` via `tools/mcp.build_mcp_tools`. Full recipe (incl. a filter): [`kali_server/README.md`](../kali_server/README.md) "Add your own tool". |
 | **Add/adjust a tool output filter** | `../kali_server/tools/_filters.py`: write `_f_<tool>` and register it in `FILTERS`; test in `../kali_server/tests/test_filters.py`. | Static noise reduction. Applied in `registry.call_tool`→`_maybe_filter`; the `raw` opt-out param is auto-injected by `mcp_tool_list`. |
 | **Turn output filtering on/off (admin)** | UI: Settings → Kali → "filter tool output" (`cfg["output_filter"].enabled`). Plumbed to Kali via `_meta.filter` in `tools/mcp._make_handler`; honoured in `kali_server.registry._maybe_filter`. | Off = every offensive tool returns its full raw output unchanged. Agents can always pass `raw=true` per call. |
 | **Add a methodology skill** | Drop a `.md` in `../skills/`; assign per-role in Settings → Agents & skills (`cfg["agent_skills"]`). | Loaded via `skills.resolve_skill_modes` / `skill_text_for`. |
 | **Change which tool categories need approval** | UI: Settings → Tool approval (`cfg["tool_approval"]`). Logic: `Session.tool_needs_approval`. | Categories = `config.TOOL_CATEGORIES`. `approval_mode="auto"` bypasses all. |
 | **Bypass approvals mid-session** | `Session.set_approval_mode` (endpoint `POST …/approval-mode`, event `approval.mode_changed`); UI checkbox `bypassApproval`/`toggleApprovalBypass`. | Per-session only; `auto` also releases pending approvals. Does not touch global config. |
 | **Reach a host-local target from Kali** | `Session._targets_host_loopback` + the NETWORK NOTE in `create_agent`; `kali_server/docker-compose.yml` `extra_hosts`. | Inside the container 127.0.0.1 ≠ host → agents use `host.docker.internal`. |
-| **See/kill running Kali processes** | Kali side: `kali_server/tools/_procs.py` (+ `_common.run`/`run_shell`, `registry._control_op`, `_meta` in `server.py`). Spider: `Session.list_kali_processes`/`kill_kali_process`/`kill_all_kali_processes`; endpoints `…/kali/processes` & `…/kill`; UI `renderProcs`/`killProc` poll. | Tagged by session/agent/tool via `_meta`; kill = `killpg`; `stop()` kills the session's procs; `init: true` reaps. |
+| **See/kill running Kali processes** | Kali side: `kali_server/tools/_procs.py` (+ `_common.run`/`run_shell`, `registry._control_op`, `_meta` in `server.py`). SPAIDER: `Session.list_kali_processes`/`kill_kali_process`/`kill_all_kali_processes`; endpoints `…/kali/processes` & `…/kill`; UI `renderProcs`/`killProc` poll. | Tagged by session/agent/tool via `_meta`; kill = `killpg`; `stop()` kills the session's procs; `init: true` reaps. |
 | **Run Kali tools in parallel / not block the monitor** | `tools/mcp.MCPClient._request` locks only for stdio, not HTTP. | Lets concurrent agent tool calls + the process monitor interleave. |
 | **Cap parallel Kali tools (shared container)** | `../kali_server/tools/_common.py` `_limiter` wraps `run`/`run_shell`; size via `SPIDER_KALI_MAX_PARALLEL` (compose/.env). | One container is shared by all users; excess tool calls **queue** instead of swamping it. `0` = unlimited. |
 | **Tune the live raw-streaming view** | `static/app.js` `updateRawStream`/`renderRaw`/`pushRaw` + the `agent.token`/`agent.raw` cases; provider streams via `on_token(text, kind)` in `llm.py`. | Live thinking+text per token; clean formatted turn on completion. `read_log.py` `renderRaw` mirrors the static format. |
 | **Force a specific tool to always need approval** | Set `requires_approval=True` on the `Tool`, or add its name to `tool_approval.always_manual_tools`. | Hard floor checked first in `tool_needs_approval`. |
-| **Change the intensity→flag behaviour** | Spider side: prompt injection in `Session.create_agent` + the `intensity` arg. Real flag mapping: `../kali_server/tools/_common.py`. | Levels = `config.INTENSITY_LEVELS`. |
+| **Change the intensity→flag behaviour** | SPAIDER side: prompt injection in `Session.create_agent` + the `intensity` arg. Real flag mapping: `../kali_server/tools/_common.py`. | Levels = `config.INTENSITY_LEVELS`. |
 | **Confine / allow PoC execution** | `cfg["poc_execution"]` (UI: Settings). Enforced in `Session._tools_for_role` via `config.HOST_EXEC_TOOLS`. | `kali_only` (default) vs `host`. Commands always go through `kali_terminal` (→ Kali); host exec tools are stripped in `kali_only`. |
 | **Change the command tool / Kali routing** | `tools/pentest.py` `_h_kali_terminal` (proxies to the Kali MCP `run_command`); it's in `_WORKER_TOOLS` (`roles.py`). | Always runs in Kali; never the host. Edit `KALI_DOWN_MSG` for the no-Kali guidance. |
 | **Let an agent ask the operator a question** | `tools/control.py` `_h_ask_user` (→ `Session.request_input`); UI alert in `static/app.js` `alertOperator` on the `user.request` event. | Blocks for an answer; raises a toast + title flash + desktop notification. |
@@ -350,6 +357,7 @@ stripped from every agent in `Session._tools_for_role` — exploits run in Kali,
 | **Configure outbound proxies** | UI Settings → Outbound proxies (`cfg["client_proxy"]`, `cfg["kali_proxy"]` — each `{enabled,url,no_proxy}`). Client: `llm._http_client` builds an httpx `mounts` client (no_proxy = direct), injected into the SDK via `http_client` (added to model_config as `_client_proxy` in `Session.create_agent`). Kali: pushed in `_meta.proxy` (`tools/mcp._make_handler`) → `kali_server/tools/_common._subprocess_env` sets HTTP(S)_PROXY/NO_PROXY on tool subprocesses. | Authenticated `http://user:pass@host:port`. Client proxy = LLM calls; Kali proxy = tool traffic. `_sanitize_config` strips both URLs for non-admins (they embed credentials). |
 | **Disable TLS verification for LLM calls** | Per-model `verify_ssl` (Settings → Models). `llm._http_client` builds an httpx client with `verify=False` (also when a proxy is set, the transports inherit it). | For self-signed/local endpoints or a TLS-intercepting proxy. Default true. |
 | **Change the report / template pipeline** | `Session.generate_report` (brief + flow), `docs.markdown_to_docx` (Word rendering), `docs._extract_docx`/`_extract_pdf` (template extraction). | Outputs both `.md` and `.docx`; template reproduced exactly. |
+| **Tune what context the reporter gets** | `Session._report_findings_dossier` (dedup + bounds) + the `role != "reporting"` guard on the memory-injection block in `create_agent`. | Reporter is fed ONE deduplicated findings dossier, not the role-memory/notes restated — prevents context overflow. |
 | **Tweak the agent loop** (turns, nudges, compaction) | `agents.Agent._loop`, `_maybe_compact`, `MAX_FINISH_NUDGES`. | Validation handshake: `finish`/`mark_validated`/`validate_agent`. |
 | **Add an LLM provider / change model params** | `llm.py`: subclass `BaseProvider`, wire into `make_provider`. Params/pricing: `config.py` + Settings → Models. | Keep `MockProvider` behaviour consistent with role/tool changes. |
 | **Add a REST endpoint** | `server.py`: add a Pydantic model + an `@app.<verb>` handler with the right auth dep (`current_user` / `require_admin`) and, for sessions, `_require(sid, user)`. | Owner-gate session routes. |

@@ -1,7 +1,7 @@
 """Web application testing tools (category: web).
 
 These are ACTIVE tests that send many requests to the target and, in sqlmap's case, attempt
-injection. They are operator-gated by default in Spider. Respect intensity (it caps threads
+injection. They are operator-gated by default in SPAIDER. Respect intensity (it caps threads
 and request rate) and stay strictly in scope."""
 from __future__ import annotations
 
