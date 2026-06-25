@@ -94,11 +94,23 @@ def test_connection_test_and_proxies() -> None:
     check("no kali proxy env without _meta proxy", _common._subprocess_env() is None)
 
     # proxy URLs (embed id:password) are stripped for non-admins
-    from spider.server import _sanitize_config
+    from spider.server import _full_error, _sanitize_config
     c["client_proxy"]["url"] = c["kali_proxy"]["url"] = "http://u:secret@px:8080"
     san = _sanitize_config(c)
     check("client proxy url stripped for non-admin", san["client_proxy"]["url"] == "")
     check("kali proxy url stripped for non-admin", san["kali_proxy"]["url"] == "")
+
+    # full LLM error: includes status + the provider's response body + a traceback
+    class _FakeAPIError(Exception):
+        status_code = 401
+        body = {"error": {"message": "invalid x-api-key"}}
+    try:
+        raise _FakeAPIError("Unauthorized")
+    except Exception as e:  # noqa: BLE001
+        full = _full_error(e)
+    check("full error keeps HTTP status", "401" in full)
+    check("full error includes the provider's response body", "invalid x-api-key" in full)
+    check("full error includes a traceback", "Traceback" in full)
 
 
 def test_approval_policy() -> None:

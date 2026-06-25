@@ -235,6 +235,15 @@ th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--bord
 .user-bar #userLabel { flex: 1; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .user-bar button { width: auto; }
 
+/* ---------- LLM connection-test result ---------- */
+.llm-test { margin: 4px 0 8px; font-size: 12px; }
+.llm-test .ok { color: var(--green); font-weight: 600; }
+.llm-test .err { color: var(--red); font-weight: 600; }
+.llm-test pre { margin: 4px 0 0; padding: 8px 10px; background: var(--panel2);
+  border: 1px solid var(--border); border-radius: 6px; max-height: 280px; overflow: auto;
+  white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; line-height: 1.4; }
+.llm-test pre.err { border-color: var(--red); }
+
 /* ---------- settings overlay & modals ---------- */
 .overlay { position: fixed; inset: 0; background: var(--bg); z-index: 50; overflow-y: auto; }
 .overlay-inner { max-width: 1100px; margin: 0 auto; padding: 18px; }

@@ -997,8 +997,9 @@ function renderConfig() {
         <button class="small" onclick="applyPreset('${role}')">Apply</button>
         <button class="small" onclick="saveAsPreset('${role}')">Save as preset…</button>
         <button class="small" onclick="testLLM('${role}')" title="Send a 'hello' to this model and show the reply">Test connection</button>
-        <span id="llmTest-${role}" class="muted" style="font-weight:normal"></span>
-      </span></h4><div class="config-grid">
+      </span></h4>
+      <div id="llmTest-${role}" class="llm-test"></div>
+      <div class="config-grid">
       <label>provider<select data-role="${role}" data-key="provider">${opt(m.provider, ["anthropic", "openai", "mock"])}</select></label>
       <label>model<input data-role="${role}" data-key="model" value="${esc(m.model)}"></label>
       <label>api_key<span class="secret-wrap"><input data-role="${role}" data-key="api_key" type="text" class="secret"
@@ -1194,7 +1195,7 @@ async function testKali() {
 }
 async function testLLM(role) {
   const el = document.getElementById(`llmTest-${role}`);
-  if (el) { el.textContent = "testing… (sending hello)"; el.style.color = "var(--muted)"; }
+  if (el) el.innerHTML = '<span class="muted">testing… (sending “hello”)</span>';
   // Read the on-screen connection fields so the test reflects unsaved edits. A blank api_key is
   // ignored server-side (the saved key is used); other unset fields fall back to the saved config.
   const params = {};
@@ -1206,13 +1207,16 @@ async function testLLM(role) {
     const r = await api("/api/config/llm/test", "POST", { role, params });
     if (!el) return;
     if (r.ok) {
-      el.textContent = `✓ ${r.model} replied${r.via_proxy ? " (via proxy)" : ""}: “${(r.reply || "").slice(0, 120)}”`;
-      el.style.color = "var(--green)";
+      el.innerHTML = `<div class="ok">✓ ${esc(r.model)} replied${r.via_proxy ? " (via proxy)" : ""}</div>`
+        + `<pre>${esc(r.reply || "")}</pre>`;
     } else {
-      el.textContent = "✗ " + (r.error || "failed");
-      el.style.color = "var(--red)";
+      // Show the WHOLE error (HTTP status + the provider's full response body + traceback).
+      el.innerHTML = `<div class="err">✗ LLM test failed${r.model ? " (" + esc(r.model) + ")" : ""}${r.via_proxy ? " — via proxy" : ""}</div>`
+        + `<pre class="err">${esc(r.error || "failed")}</pre>`;
     }
-  } catch (e) { if (el) { el.textContent = "✗ " + e.message; el.style.color = "var(--red)"; } }
+  } catch (e) {
+    if (el) el.innerHTML = `<div class="err">✗ request failed</div><pre class="err">${esc(e.message || e)}</pre>`;
+  }
 }
 async function saveAgentDef(i) {
   const d = state.agentDefs[i];
