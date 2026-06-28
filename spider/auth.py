@@ -110,10 +110,13 @@ class Auth:
     # ---- account management ----
     async def create_user(self, username: str, password: str, role: str = "user") -> User:
         username = (username or "").strip()
+        role = (role or "user").strip()
         if not username:
             raise AuthError("username is required")
-        if role not in ROLES:
-            raise AuthError(f"role must be one of {ROLES}")
+        if not role:
+            raise AuthError("role is required")
+        # `admin` is the built-in privileged role; any other value must be a custom role defined in
+        # the config (validated by the server before calling this — auth.py stays config-agnostic).
         if len(password or "") < 8:
             raise AuthError("password must be at least 8 characters")
         if await self.db.get_user_by_username(username):
@@ -147,6 +150,19 @@ class Auth:
         if disabled and row["role"] == "admin" and await self.db.count_admins() <= 1:
             raise AuthError("cannot disable the last administrator")
         await self.db.update_user(uid, {"disabled": 1 if disabled else 0})
+
+    async def set_role(self, uid: str, role: str) -> None:
+        """Change a user's access role. Guards the last admin (can't demote the only one). Role
+        validity (custom roles) is checked by the caller against the config."""
+        role = (role or "").strip()
+        if not role:
+            raise AuthError("role is required")
+        row = await self.db.get_user(uid)
+        if not row:
+            raise AuthError("no such user")
+        if row["role"] == "admin" and role != "admin" and await self.db.count_admins() <= 1:
+            raise AuthError("cannot remove the last administrator")
+        await self.db.update_user(uid, {"role": role})
 
     async def delete_user(self, uid: str) -> None:
         row = await self.db.get_user(uid)

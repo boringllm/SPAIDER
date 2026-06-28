@@ -176,6 +176,118 @@ def test_disclaimer_flag() -> None:
     os.environ.pop("SPAIDER_REQUIRE_DISCLAIMER", None)
 
 
+def test_rbac_and_targets() -> None:
+    """Custom access roles (capabilities), per-session read grants, the rename capability rule, the
+    hidden target-picker env flag, and the target-provider script."""
+    import os
+    from types import SimpleNamespace
+
+    from spider.server import (_can, _can_view_session, _load_targets, _role_caps,
+                               _separate_pentest, _valid_role)
+
+    cfg = {
+        "user_roles": {
+            "user": {"read": False, "launch_pentest": True, "free_target_choice": True, "edit_session": True},
+            "viewer": {"read": True, "launch_pentest": False, "free_target_choice": False, "edit_session": False},
+            "limited": {"read": False, "launch_pentest": True, "free_target_choice": False, "edit_session": False},
+        },
+        "session_grants": {
+            "u_viewer": [{"owner": "u_alice", "sessions": ["*"]},
+                         {"owner": "u_bob", "sessions": ["s_one"]}],
+        },
+    }
+    admin = SimpleNamespace(id="u_admin", role="admin", is_admin=True)
+    viewer = SimpleNamespace(id="u_viewer", role="viewer", is_admin=False)
+    limited = SimpleNamespace(id="u_lim", role="limited", is_admin=False)
+
+    # The launch/free-target distinction only exists when SEPARATE_PENTEST is on; force it on for the
+    # distinction-based checks below (the merged-default behaviour is tested separately at the end).
+    os.environ["SEPARATE_PENTEST"] = "1"
+
+    # capabilities
+    check("admin has every cap", all(_role_caps("admin").get(c) for c in ("read", "launch_pentest", "free_target_choice", "edit_session")))
+    check("viewer can read, not run", _can(viewer, "read", cfg=cfg) and not _can(viewer, "launch_pentest", cfg=cfg))
+    check("limited can run but not free", _can(limited, "launch_pentest", cfg=cfg) and not _can(limited, "free_target_choice", cfg=cfg))
+    check("admin can do anything", _can(admin, "free_target_choice") and _can(admin, "edit_session"))
+
+    # read grants (alice = all, bob = only s_one)
+    alice_s = {"owner": "u_alice", "id": "s_x"}
+    bob_one = {"owner": "u_bob", "id": "s_one"}
+    bob_two = {"owner": "u_bob", "id": "s_two"}
+    own = {"owner": "u_viewer", "id": "s_self"}
+    check("viewer sees granted owner's sessions (wildcard)", _can_view_session(viewer, alice_s, cfg))
+    check("viewer sees specifically-granted session", _can_view_session(viewer, bob_one, cfg))
+    check("viewer cannot see non-granted session of bob", not _can_view_session(viewer, bob_two, cfg))
+    check("viewer sees own session", _can_view_session(viewer, own, cfg))
+    check("admin sees any session", _can_view_session(admin, bob_two, cfg))
+    check("limited (no read) sees only own", not _can_view_session(limited, alice_s, cfg))
+
+    # edit_session only for the OWNER (with the cap), never a granted viewer
+    sess_alice = SimpleNamespace(owner="u_alice", id="s_x")
+    check("viewer cannot rename a granted session", not _can(viewer, "edit_session", sess_alice, cfg))
+    sess_own = SimpleNamespace(owner="u_lim", id="s_self")
+    check("limited cannot rename even own (no cap)", not _can(limited, "edit_session", sess_own, cfg))
+
+    # role validity
+    check("admin role is valid", _valid_role("admin", cfg))
+    check("custom role is valid", _valid_role("viewer", cfg))
+    check("unknown role is invalid", not _valid_role("ghost", cfg))
+
+    # SEPARATE_PENTEST (hidden, default OFF): with it OFF the launch_pentest and free_target_choice
+    # rights are MERGED — a "limited" role (launch only) gains free target choice. With it ON, the
+    # original limited-vs-free distinction holds.
+    os.environ.pop("SEPARATE_PENTEST", None)
+    check("pentest rights merged by default", _separate_pentest() is False)
+    check("merged: limited role gains free target choice", _can(limited, "free_target_choice", cfg=cfg))
+    check("merged: limited can still launch", _can(limited, "launch_pentest", cfg=cfg))
+    check("merged: viewer (no pentest) still cannot run", not _can(viewer, "launch_pentest", cfg=cfg))
+    os.environ["SEPARATE_PENTEST"] = "1"
+    check("SEPARATE_PENTEST on restores the distinction", _separate_pentest() is True)
+    check("separate: limited has NO free target choice", not _can(limited, "free_target_choice", cfg=cfg))
+    check("separate: limited can still launch", _can(limited, "launch_pentest", cfg=cfg))
+    os.environ.pop("SEPARATE_PENTEST", None)
+
+    # the example target-provider script returns usable, normalised targets
+    targets, error = _load_targets()
+    check("target provider returns targets", not error and len(targets) >= 1)
+    check("targets are normalised", all(t.get("target") and "name" in t and "session_name" in t for t in targets))
+
+    # start accepts a provider-dictated session name (applied server-side so a LIMITED operator —
+    # launch_pentest but no edit_session — still gets the script's name when the picker drives it)
+    from spider.server import StartSession
+    check("start carries a provider name", StartSession(target="t", name="From script").name == "From script")
+    check("start name defaults empty", StartSession(target="t").name == "")
+
+
+async def test_session_rename() -> None:
+    """A session can be renamed at any time without breaking its workspace/db (both keyed by id)."""
+    import tempfile
+
+    from spider import config
+    from spider.db import Database
+    from spider.session import Session
+
+    tmp = Path(tempfile.mkdtemp(prefix="spider_rename_"))
+    cfg = _mock_cfg()
+    cfg["workspace_root"] = str(tmp / "workspaces")
+    cfg["agents_dir"] = str(tmp / "agents")
+    config.CONFIG_DIR = tmp / "config"
+    db = Database(str(tmp / "r.db"))
+    sess = Session("Original name", "t", cfg, db)
+    await sess.setup()
+    sid = sess.id
+    await sess.rename("Renamed mid-session")
+    check("session name updated", sess.name == "Renamed mid-session")
+    rows = await db.list_sessions(owner=None)
+    check("rename persisted to db", any(r["id"] == sid and r["name"] == "Renamed mid-session" for r in rows))
+    try:
+        await sess.rename("   ")
+        check("empty rename rejected", False)
+    except ValueError:
+        check("empty rename rejected", True)
+    await sess.shutdown()
+
+
 def test_approval_policy() -> None:
     from spider import config
     from spider.db import Database
@@ -323,6 +435,15 @@ async def test_turn_budget_handoff() -> None:
           all(s.status == "done" and s.awaiting_validation is False for s in summarizers))
     check("exhausted sub-agent closes done (not stuck awaiting validation)", child.status == "done")
     check("exhausted sub-agent is not awaiting validation", child.awaiting_validation is False)
+
+    # The handoff summary must reach MASTER MEMORY (record_agent_memory runs when the exhausted agent
+    # closes 'done'), so agents spawned afterwards inherit what the summarizer distilled.
+    master_path = sess.workspace / "memory" / "master.md"
+    master_txt = master_path.read_text(encoding="utf-8") if master_path.exists() else ""
+    check("handoff summary written to master memory file",
+          "REACHED MAX TURN BUDGET" in master_txt and child.name in master_txt)
+    check("master memory updated in-memory", any(child.name in e for e in sess.master_memory))
+    check("later agents inherit the handoff via the master digest", child.name in sess._master_memory_block())
 
     # Re-engaging an EXHAUSTED agent whose budget was NOT raised must NOT spawn a SECOND summarizer
     # for the same exhaustion (the bug where the summarizer kicked in twice for one exhausted agent).
@@ -721,6 +842,8 @@ def main() -> int:
     print("- approval policy");     test_approval_policy()
     print("- .env loader");         test_env_loader()
     print("- disclaimer flag");     test_disclaimer_flag()
+    print("- rbac & targets");      test_rbac_and_targets()
+    print("- session rename");      asyncio.run(test_session_rename())
     print("- llm test + proxies");  test_connection_test_and_proxies()
     print("- poc execution policy"); test_poc_execution_policy()
     print("- reference documents"); test_reference_documents()

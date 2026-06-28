@@ -69,17 +69,16 @@ function renderSessions() {
   const el = document.getElementById("sessionList");
   if (!state.sessions.length) { el.innerHTML = '<div class="empty">No sessions</div>'; return; }
   const me = state.user || {};
-  const isAdmin = me.role === "admin";
   el.innerHTML = state.sessions.map(s => {
     const running = s.status === "running";
-    // For an admin, label sessions that belong to OTHER users so they can monitor (and, if needed,
-    // stop) any operator's engagement. The server already lets admins open/stop any session; this is
-    // just the visual cue for whose it is.
-    const others = isAdmin && s.owner && s.owner !== me.id;
+    // Label sessions that belong to OTHER users (an admin monitoring everyone, or a read-granted
+    // viewer) so it's clear whose engagement each one is. Only the owner (or an admin) may delete.
+    const others = s.owner && s.owner !== me.id;
+    const mayDelete = !others;  // server enforces; non-owners (readers) can't delete
     const ownerTag = others ? `<span class="sess-owner" title="owner">👤 ${esc(s.owner_name || s.owner)}</span>` : "";
     return `
     <div class="session-item ${s.id === state.current ? "active" : ""} ${others ? "other-owner" : ""}" onclick="selectSession('${s.id}')">
-      <button class="del-btn" title="Delete session" onclick="deleteSession(event,'${s.id}')">✕</button>
+      ${mayDelete ? `<button class="del-btn" title="Delete session" onclick="deleteSession(event,'${s.id}')">✕</button>` : ""}
       <div class="name">${running ? '<span class="live-dot" title="running"></span>' : ""}${esc(s.name)} ${ownerTag}</div>
       <div class="meta">${esc(s.status)} · ${esc(s.target || "no target")}</div>
     </div>`;
@@ -89,7 +88,8 @@ function renderSessions() {
 // background. Regular users only see their own sessions and don't need the extra polling.
 function startSessionPoll() {
   stopSessionPoll();
-  if (!state.user || state.user.role !== "admin") return;
+  // Admins (all sessions) and read-capable viewers (granted sessions) benefit from a live list.
+  if (!state.isAdmin && !cap("read")) return;
   state.sessionPoll = setInterval(() => { loadSessions().catch(() => {}); }, 5000);
 }
 function stopSessionPoll() { if (state.sessionPoll) { clearInterval(state.sessionPoll); state.sessionPoll = null; } }
@@ -148,6 +148,7 @@ async function selectSession(sid) {
   document.getElementById("sessName").textContent = state.session.name;
   document.getElementById("targetInput").value = state.session.target || "";
   document.getElementById("instructionsInput").value = state.session.instructions || "";
+  applyCapsUI();   // show/hide Start/Resume/Rename + lock manual fields per this user's capabilities
   const orch = Object.values(state.agents).find(a => a.role === "orchestrator");
   state.selectedAgent = orch ? orch.id : "__all__";
   state.showPanels = window.innerWidth >= 1100;
@@ -216,6 +217,13 @@ function handleEvent(ev) {
   switch (ev.type) {
     case "session.status":
       if (state.session) state.session.status = p.status; renderStatus(); renderSessions(); break;
+    case "session.renamed": {
+      // Live title update (e.g. an admin renamed it, or a script-driven name was applied).
+      if (state.session) state.session.name = p.name;
+      const el = document.getElementById("sessName"); if (el) el.textContent = p.name;
+      const sx = (state.sessions || []).find(x => x.id === state.current); if (sx) sx.name = p.name;
+      renderSessions(); break;
+    }
     case "plan.update": case "plan.step": state.plan = p.plan; renderPlan(); break;
     case "agent.created":
       state.agents[aid] = { id: aid, name: p.name, role: p.role, status: "running",
@@ -322,6 +330,7 @@ function renderAll() { renderStatus(); renderTree(); renderAgentHead(); renderAc
 function renderStatus() {
   const s = state.session ? state.session.status : "created";
   const el = document.getElementById("sessStatus"); el.textContent = s; el.className = "badge " + s;
+  applyCapsUI();   // keep the Start button greyed/un-greyed as the session starts/stops
 }
 function setView(v) {
   state.view = v;
@@ -762,14 +771,124 @@ async function toggleApprovalBypass() {
 }
 
 // ----------------------------------------------------------- controls
+async function renameSession() {
+  if (!state.current) return;
+  const cur = (state.session && state.session.name) || "";
+  const name = prompt("Rename session:", cur);
+  if (name == null) return;                 // cancelled
+  const n = name.trim();
+  if (!n || n === cur) return;
+  try {
+    await api(`/api/sessions/${state.current}/rename`, "POST", { name: n });
+    if (state.session) state.session.name = n;
+    document.getElementById("sessName").textContent = n;
+    const s = (state.sessions || []).find(x => x.id === state.current); if (s) s.name = n;
+    renderSessions();
+  } catch (e) { alert(e.message || "rename failed"); }
+}
+
 async function startSession() {
-  const target = document.getElementById("targetInput").value.trim();
-  const instructions = document.getElementById("instructionsInput").value.trim();
-  if (!target) { alert("Enter a target."); return; }
+  let target = document.getElementById("targetInput").value.trim();
+  let instructions = document.getElementById("instructionsInput").value.trim();
+  let sessionName = "";
   // Risk disclaimer (hidden feature): must be acknowledged before an engagement can start.
   if (!(await showDisclaimer("start"))) return;
-  try { await api(`/api/sessions/${state.current}/start`, "POST", { target, instructions }); }
+  // Hidden target-picker feature: after the disclaimer, choose the target from the approved list.
+  // LIMITED operators (no free_target_choice) must pick from the list and cannot edit target/instructions/
+  // name; FREE operators may instead enter their own and rename the session.
+  if (state.targetPicker) {
+    const pick = await showTargetPicker();
+    if (!pick) return;                      // cancelled
+    target = pick.target;
+    instructions = pick.instructions || "";
+    sessionName = pick.session_name || "";  // applied server-side by /start (works for limited ops too)
+  }
+  if (!target) { alert("Enter or select a target."); return; }
+  try {
+    // The server applies `name` itself, so a limited operator (no edit_session) still gets the
+    // script's name. Reflect everything back into the session UI so the details aren't left blank.
+    const r = await api(`/api/sessions/${state.current}/start`, "POST", { target, instructions, name: sessionName });
+    applyStartedSession(r, target, instructions);
+  }
   catch (e) { alert("Start failed: " + e.message); }
+}
+// Push the started session's target / instructions / name into the on-screen fields, the session
+// header, and the sidebar list (the start endpoint returns the updated session dict).
+function applyStartedSession(r, target, instructions) {
+  const t = (r && r.target) || target || "";
+  const ins = (r && r.instructions != null) ? r.instructions : (instructions || "");
+  const nm = (r && r.name) || (state.session && state.session.name) || "";
+  const ti = document.getElementById("targetInput"); if (ti) ti.value = t;
+  const ii = document.getElementById("instructionsInput"); if (ii) ii.value = ins;
+  if (state.session) { state.session.target = t; state.session.instructions = ins; state.session.name = nm; if (r && r.status) state.session.status = r.status; }
+  const sn = document.getElementById("sessName"); if (sn) sn.textContent = nm;
+  const sx = (state.sessions || []).find(x => x.id === state.current);
+  if (sx) { sx.target = t; sx.name = nm; if (r && r.status) sx.status = r.status; }
+  renderSessions();
+}
+
+// ---- target picker (always shown at engagement start) ----
+// Resolves to {target, instructions, session_name} or null (cancelled). The target list comes from
+// the operator's provider script (GET /api/targets). LIMITED operators (no free_target_choice) may only
+// pick from the list; FREE operators also get a manual-entry option.
+let _targetResolve = null;
+let _targets = [];
+let _targetFree = false;
+let _targetSel = null;
+async function showTargetPicker() {
+  let data;
+  try { data = await api("/api/targets"); }
+  catch (e) { alert(e.message || "could not load targets"); return null; }
+  if (!data.enabled) {  // feature off — fall back to whatever is in the manual fields
+    return { target: document.getElementById("targetInput").value.trim(),
+             instructions: document.getElementById("instructionsInput").value.trim(), session_name: "" };
+  }
+  _targets = data.targets || [];
+  _targetFree = !!data.free;
+  _targetSel = null;
+  renderTargetPicker(data.error);
+  document.getElementById("targetModal").classList.remove("hidden");
+  return new Promise(res => { _targetResolve = res; });
+}
+function renderTargetPicker(error) {
+  document.getElementById("targetPickStatus").textContent = error
+    ? ("⚠ " + error)
+    : (_targetFree ? "Pick an approved target, or enter your own." : "Choose one of the approved targets.");
+  let html = _targets.map(t => `
+    <label class="target-opt"><input type="radio" name="tgt" onchange="selectTarget('${esc(t.id)}')">
+      <span class="target-meta"><b>${esc(t.name)}</b> <span class="muted">${esc(t.target)}</span>
+      ${t.instructions ? `<div class="muted target-instr">${esc(truncate(t.instructions, 180))}</div>` : ""}</span></label>`).join("");
+  if (_targetFree) {
+    html += `<label class="target-opt"><input type="radio" name="tgt" onchange="selectTarget('__manual__')">
+      <span class="target-meta"><b>✏️ Enter a target manually</b></span></label>`;
+  }
+  document.getElementById("targetList").innerHTML = html || '<div class="empty">No targets available.</div>';
+  document.getElementById("targetManual").classList.add("hidden");
+}
+function selectTarget(id) {
+  _targetSel = id;
+  document.getElementById("targetManual").classList.toggle("hidden", id !== "__manual__");
+}
+function confirmTargetPick() {
+  if (!_targetSel) { alert("Select a target."); return; }
+  if (_targetSel === "__manual__") {
+    const target = document.getElementById("manualTarget").value.trim();
+    if (!target) { alert("Enter a target."); return; }
+    resolveTargetPicker({
+      target,
+      instructions: document.getElementById("manualInstr").value.trim(),
+      session_name: document.getElementById("manualName").value.trim(),
+    });
+    return;
+  }
+  const t = _targets.find(x => x.id === _targetSel);
+  if (!t) { alert("Select a target."); return; }
+  resolveTargetPicker({ target: t.target, instructions: t.instructions, session_name: t.session_name });
+}
+function resolveTargetPicker(val) {
+  document.getElementById("targetModal").classList.add("hidden");
+  const r = _targetResolve; _targetResolve = null;
+  if (r) r(val);
 }
 
 // ---- reference documents (md / txt / pdf / docx) attached to the engagement ----
@@ -902,6 +1021,11 @@ function closeSettings() { document.getElementById("configOverlay").classList.ad
 function setSettingsTab(name) {
   document.querySelectorAll(".settings-tabs button").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
   document.querySelectorAll(".settings-page").forEach(p => p.classList.toggle("hidden", p.dataset.page !== name));
+  // Refresh data that other tabs may have changed, so switching tabs always shows current state.
+  // In particular the Access tab's grant dropdowns are built from the user + session lists, so a user
+  // just created on the Users tab must show up here without having to close and reopen Settings.
+  if (name === "users") loadUsers();
+  else if (name === "access") loadUsers().then(() => loadSessions()).then(renderAccess).catch(() => renderAccess());
 }
 async function loadConfig() {
   state.config = await api("/api/config");
@@ -910,6 +1034,7 @@ async function loadConfig() {
   renderConfig();
   await loadRoles(); await loadAgentDefs(); await loadTools();
   await loadUsers();     // admin-only Users tab (Settings is admin-only anyway)
+  renderAccess();        // access roles + grants (uses state.config + state.users)
 }
 
 // ---- model parameter presets ----
@@ -1369,6 +1494,7 @@ async function saveConfig() {
   document.querySelectorAll("[data-cat]").forEach(s => { pol.by_category[s.dataset.cat] = s.value; });
   gatherModels();  // sync per-agent model inputs (skills already tracked in state.config.agent_skills)
   gatherPricing();
+  gatherAccessRoles();   // sync the access-role capability checkboxes into c.user_roles
   // Reject non-ASCII in header-bound fields (a common copy-paste artifact, e.g. the '•' mask).
   for (const [role, m] of Object.entries(c.models)) {
     for (const f of ["api_key", "base_url"]) {
@@ -1387,14 +1513,25 @@ async function saveConfig() {
 }
 
 // ----------------------------------------------------------- auth gate
+// The caller's access capabilities + hidden feature flags, surfaced by /api/auth/status.
+function applyAuthMeta(st) {
+  state.requireDisclaimer = !!st.disclaimer;   // hidden SPAIDER_REQUIRE_DISCLAIMER
+  state.targetPicker = !!st.target_picker;     // target picker is always on now
+  state.separatePentest = !!st.separate_pentest; // hidden: keep launch/free target rights distinct
+  state.caps = st.caps || {};                  // access capabilities for this user
+  state.isAdmin = !!st.is_admin;
+}
+function cap(name) { return state.isAdmin || !!(state.caps && state.caps[name]); }
 async function initAuth() {
   let st;
   try { st = await fetch("/api/auth/status").then(r => r.json()); }
   catch (e) { st = { authenticated: false, needs_setup: false }; }
-  // Hidden risk-disclaimer feature flag (SPAIDER_REQUIRE_DISCLAIMER on the server).
-  state.requireDisclaimer = !!st.disclaimer;
+  applyAuthMeta(st);
   if (st.authenticated && st.user) bootApp(st.user);
   else showAuthForms(st.needs_setup);
+}
+async function refreshAuthMeta() {
+  try { applyAuthMeta(await fetch("/api/auth/status").then(r => r.json())); } catch (e) { /* keep prior */ }
 }
 function showAuthForms(needsSetup) {
   document.getElementById("authOverlay").classList.remove("hidden");
@@ -1418,11 +1555,42 @@ function bootApp(user) {
 }
 function applyUserUI(user) {
   document.getElementById("userLabel").textContent = `${user.username} · ${user.role}`;
-  // Global Settings (config + user management) is admin-only. The server enforces this; the
-  // UI simply hides the entry points for regular users.
-  const isAdmin = user.role === "admin";
+  // Global Settings (config + user management + access roles) is admin-only. The server enforces
+  // this; the UI simply hides the entry points for everyone else.
+  const isAdmin = state.isAdmin;
   const sa = document.getElementById("settingsAction"); if (sa) sa.style.display = isAdmin ? "" : "none";
-  const ut = document.querySelector('.settings-tabs [data-tab="users"]'); if (ut) ut.style.display = isAdmin ? "" : "none";
+  document.querySelectorAll('.settings-tabs [data-tab="users"], .settings-tabs [data-tab="access"]')
+    .forEach(t => { t.style.display = isAdmin ? "" : "none"; });
+  applyCapsUI();
+}
+// Show/hide per-session controls according to the caller's capabilities + the hidden target picker.
+function applyCapsUI() {
+  const show = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? "" : "none"; };
+  // No pentest right → no way to create or run engagements (the server enforces this too).
+  show("newSessionAction", cap("launch_pentest"));
+  show("startBtn", cap("launch_pentest"));
+  show("resumeBtn", cap("launch_pentest"));
+  show("renameBtn", cap("edit_session"));
+  // Start only applies to a brand-NEW session. Once it has been launched (running, or stopped/done/
+  // error afterwards) Start stays greyed out — the operator continues it by typing in an agent's
+  // chat (or Resume). Enabled only while the session is still "created".
+  const started = !!(state.session && state.session.status && state.session.status !== "created");
+  const sb = document.getElementById("startBtn");
+  if (sb) {
+    sb.disabled = started;
+    sb.title = started ? "Session already launched — type in an agent's chat (or Resume) to continue it" : "";
+  }
+  // LIMITED pentest (picker on + no free_target_choice): the target + instructions come from the provider
+  // script, so hide the manual entry fields. Free users keep them.
+  const limited = state.targetPicker && cap("launch_pentest") && !cap("free_target_choice");
+  show("instructionsRow", !limited);
+  const ti = document.getElementById("targetInput");
+  if (ti) {
+    ti.readOnly = limited;
+    ti.placeholder = limited
+      ? "Target is chosen from the approved list when you press Start"
+      : "In-scope target(s), e.g. 10.10.10.5, https://app.example.com";
+  }
 }
 async function doLogin() {
   const username = document.getElementById("loginUser").value.trim();
@@ -1431,6 +1599,7 @@ async function doLogin() {
   try {
     const r = await api("/api/auth/login", "POST", { username, password });
     document.getElementById("loginPass").value = "";
+    await refreshAuthMeta();   // pick up this user's capabilities + feature flags
     bootApp(r.user);
   } catch (e) { err.textContent = e.message || "login failed"; }
 }
@@ -1442,6 +1611,7 @@ async function doSetup() {
   if (password !== confirm) { err.textContent = "passwords do not match"; return; }
   try {
     const r = await api("/api/auth/setup", "POST", { username, password });
+    await refreshAuthMeta();
     bootApp(r.user);
   } catch (e) { err.textContent = e.message || "setup failed"; }
 }
@@ -1461,13 +1631,18 @@ async function loadUsers() {
   try { state.users = await api("/api/users"); } catch (e) { state.users = []; }
   renderUsers();
 }
+// Role <option> list = built-in admin + every custom role defined in the config.
+function roleOptions(selected) {
+  const names = ["admin", ...Object.keys((state.config && state.config.user_roles) || {})];
+  return names.map(n => `<option value="${esc(n)}" ${n === selected ? "selected" : ""}>${esc(n)}</option>`).join("");
+}
 function renderUsers() {
   const el = document.getElementById("usersConfig"); if (!el) return;
   const me = state.user || {};
   const rows = (state.users || []).map(u => `
     <tr>
       <td><b>${esc(u.username)}</b>${u.id === me.id ? ' <span class="muted">(you)</span>' : ""}</td>
-      <td><code>${esc(u.role)}</code></td>
+      <td><select class="small" onchange="changeUserRole('${u.id}', this.value)">${roleOptions(u.role)}</select></td>
       <td>${u.disabled ? '<span class="badge">disabled</span>' : '<span class="muted">active</span>'}</td>
       <td>
         <button class="small" onclick="resetUserPassword('${u.id}','${esc(u.username)}')">Reset password</button>
@@ -1477,6 +1652,117 @@ function renderUsers() {
     </tr>`).join("");
   el.innerHTML = `<div class="config-role"><table class="tools-table">
     <tr><th>username</th><th>role</th><th>status</th><th>actions</th></tr>${rows}</table></div>`;
+  // keep the "Add user" role dropdown in sync with the defined roles
+  const sel = document.getElementById("newUserRole");
+  if (sel) { const cur = sel.value; sel.innerHTML = roleOptions(cur && cur !== "" ? cur : "user"); }
+}
+async function changeUserRole(uid, role) {
+  try { await api(`/api/users/${uid}/role`, "POST", { role }); await loadUsers(); }
+  catch (e) { alert(e.message || "could not change role"); await loadUsers(); }
+}
+
+// ---------------------------------------------------------- access roles & grants (admin)
+// NOTE: these are USER ACCESS roles (capabilities), distinct from the AGENT roles managed on the
+// "Agents & skills" tab (renderRoles/addRole/removeRole above). Names are deliberately namespaced
+// (`…AccessRole…`) to avoid colliding with the agent-role functions/ids.
+const ACCESS_CAPS = ["read", "launch_pentest", "free_target_choice", "edit_session"];
+// The capability columns to actually show. When the pentest rights are MERGED (SEPARATE_PENTEST off,
+// the default) launch_pentest is hidden — free_target_choice is the single pentest right.
+function accessCaps() {
+  return state.separatePentest ? ACCESS_CAPS : ACCESS_CAPS.filter(c => c !== "launch_pentest");
+}
+function renderAccess() { renderAccessRoles(); renderGrants(); }
+function renderAccessRoles() {
+  const el = document.getElementById("accessRolesConfig"); if (!el) return;
+  const roles = (state.config && state.config.user_roles) || {};
+  const caps = accessCaps();
+  let html = `<div class="config-role"><table class="tools-table"><tr><th>role</th>${caps.map(c => `<th>${c}</th>`).join("")}<th></th></tr>`;
+  html += `<tr><td><b>admin</b> <span class="muted">(+Settings)</span></td>${caps.map(() => "<td>✓</td>").join("")}<td class="muted">built-in</td></tr>`;
+  for (const [name, rc] of Object.entries(roles)) {
+    html += `<tr><td><b style="color:var(--purple)">${esc(name)}</b></td>` +
+      caps.map(c => `<td><input type="checkbox" data-role-cap="${esc(name)}|${c}" ${rc[c] ? "checked" : ""} onchange="gatherAccessRoles()"></td>`).join("") +
+      `<td>${name === "user" ? '<span class="muted">default</span>' : `<button class="small danger" onclick="deleteAccessRole('${esc(name)}')">Delete</button>`}</td></tr>`;
+  }
+  el.innerHTML = html + "</table></div>";
+}
+function gatherAccessRoles() {
+  const roles = state.config.user_roles = state.config.user_roles || {};
+  document.querySelectorAll("[data-role-cap]").forEach(cb => {
+    const [name, capn] = cb.dataset.roleCap.split("|");
+    (roles[name] = roles[name] || {})[capn] = cb.checked;
+  });
+  // Merged mode: launch_pentest is hidden and tracks free_target_choice, so the single visible
+  // pentest checkbox controls both keys (no stale launch_pentest=true leaking a pentest right).
+  if (!state.separatePentest) {
+    for (const r of Object.values(roles)) r.launch_pentest = !!r.free_target_choice;
+  }
+}
+function addAccessRole() {
+  const name = document.getElementById("newAccessRoleName").value.trim();
+  const st = document.getElementById("addAccessRoleStatus");
+  state.config.user_roles = state.config.user_roles || {};
+  if (!name) { st.textContent = "enter a name"; return; }
+  if (name === "admin" || state.config.user_roles[name]) { st.textContent = "already exists"; return; }
+  gatherAccessRoles();
+  state.config.user_roles[name] = { read: false, launch_pentest: true, free_target_choice: true, edit_session: true };
+  document.getElementById("newAccessRoleName").value = "";
+  st.textContent = "✓ added — press Save to persist";
+  renderAccessRoles(); renderUsers();
+}
+function deleteAccessRole(name) {
+  if (name === "user") { alert("the default 'user' role cannot be deleted"); return; }
+  if (!confirm(`Delete role "${name}"? Reassign any users who still have it.`)) return;
+  gatherAccessRoles();
+  delete state.config.user_roles[name];
+  renderAccessRoles(); renderUsers();
+}
+function renderGrants() {
+  const el = document.getElementById("grantsConfig"); if (!el) return;
+  const grants = (state.config && state.config.session_grants) || {};
+  const uname = id => ((state.users || []).find(u => u.id === id) || {}).username || id;
+  let rows = "";
+  for (const [grantee, list] of Object.entries(grants)) {
+    (list || []).forEach((g, i) => {
+      const sess = (g.sessions || []).includes("*") ? "all sessions" : `${(g.sessions || []).length} session(s)`;
+      rows += `<tr><td><b>${esc(uname(grantee))}</b></td><td>${esc(uname(g.owner))}</td><td>${esc(sess)}</td>
+        <td><button class="small danger" onclick="deleteGrant('${esc(grantee)}',${i})">Remove</button></td></tr>`;
+    });
+  }
+  el.innerHTML = rows
+    ? `<div class="config-role"><table class="tools-table"><tr><th>reader</th><th>owner</th><th>sessions</th><th></th></tr>${rows}</table></div>`
+    : '<div class="config-role muted">No read grants yet.</div>';
+  const opts = (state.users || []).map(u => `<option value="${u.id}">${esc(u.username)}</option>`).join("");
+  ["grantGrantee", "grantOwner"].forEach(id => { const s = document.getElementById(id); if (s) s.innerHTML = opts; });
+  updateGrantSessions();
+}
+async function updateGrantSessions() {
+  const sel = document.getElementById("grantSessions"); if (!sel) return;
+  const owner = (document.getElementById("grantOwner") || {}).value;
+  let opts = '<option value="*">all of their sessions</option>';
+  (state.sessions || []).filter(s => s.owner === owner).forEach(s => { opts += `<option value="${s.id}">${esc(s.name)}</option>`; });
+  sel.innerHTML = opts;
+}
+function addGrant() {
+  const grantee = document.getElementById("grantGrantee").value;
+  const owner = document.getElementById("grantOwner").value;
+  const sv = document.getElementById("grantSessions").value;
+  const st = document.getElementById("addGrantStatus");
+  if (!grantee || !owner) { st.textContent = "pick both users"; return; }
+  if (grantee === owner) { st.textContent = "reader and owner must differ"; return; }
+  const grants = state.config.session_grants = state.config.session_grants || {};
+  const list = grants[grantee] = grants[grantee] || [];
+  let entry = list.find(g => g.owner === owner);
+  if (!entry) { entry = { owner, sessions: [] }; list.push(entry); }
+  if (sv === "*") entry.sessions = ["*"];
+  else if (!entry.sessions.includes("*") && !entry.sessions.includes(sv)) entry.sessions.push(sv);
+  st.textContent = "✓ added — press Save to persist";
+  renderGrants();
+}
+function deleteGrant(grantee, idx) {
+  const list = ((state.config.session_grants || {})[grantee]) || [];
+  list.splice(idx, 1);
+  if (!list.length) delete state.config.session_grants[grantee];
+  renderGrants();
 }
 async function addUser() {
   const username = document.getElementById("newUserName").value.trim();
@@ -1488,11 +1774,12 @@ async function addUser() {
     document.getElementById("newUserName").value = "";
     document.getElementById("newUserPass").value = "";
     st.textContent = "✓ added"; await loadUsers();
+    renderAccess();   // new user must appear in the access-grant dropdowns immediately
   } catch (e) { st.textContent = "✕ " + (e.message || "failed"); }
 }
 async function removeUser(uid, name) {
   if (!confirm(`Delete user "${name}"? Their sessions remain but become visible to admins only.`)) return;
-  try { await api(`/api/users/${uid}`, "DELETE"); await loadUsers(); }
+  try { await api(`/api/users/${uid}`, "DELETE"); await loadUsers(); renderAccess(); }
   catch (e) { alert(e.message || "delete failed"); }
 }
 async function resetUserPassword(uid, name) {
