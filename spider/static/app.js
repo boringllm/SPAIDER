@@ -1666,6 +1666,15 @@ async function changeUserRole(uid, role) {
 // "Agents & skills" tab (renderRoles/addRole/removeRole above). Names are deliberately namespaced
 // (`…AccessRole…`) to avoid colliding with the agent-role functions/ids.
 const ACCESS_CAPS = ["read", "launch_pentest", "free_target_choice", "edit_session"];
+// Friendly DISPLAY names for the capability columns. These are labels only — the underlying keys
+// (ACCESS_CAPS, stored config, server logic) are unchanged. Edit the text here to rename a column.
+const CAP_LABELS = {
+  read: "Read",
+  launch_pentest: "Run pentest",
+  free_target_choice: "Free target choice",
+  edit_session: "Edit session name",
+};
+function capLabel(c) { return CAP_LABELS[c] || c; }
 // The capability columns to actually show. When the pentest rights are MERGED (SEPARATE_PENTEST off,
 // the default) launch_pentest is hidden — free_target_choice is the single pentest right.
 function accessCaps() {
@@ -1676,7 +1685,7 @@ function renderAccessRoles() {
   const el = document.getElementById("accessRolesConfig"); if (!el) return;
   const roles = (state.config && state.config.user_roles) || {};
   const caps = accessCaps();
-  let html = `<div class="config-role"><table class="tools-table"><tr><th>role</th>${caps.map(c => `<th>${c}</th>`).join("")}<th></th></tr>`;
+  let html = `<div class="config-role"><table class="tools-table"><tr><th>role</th>${caps.map(c => `<th>${esc(capLabel(c))}</th>`).join("")}<th></th></tr>`;
   html += `<tr><td><b>admin</b> <span class="muted">(+Settings)</span></td>${caps.map(() => "<td>✓</td>").join("")}<td class="muted">built-in</td></tr>`;
   for (const [name, rc] of Object.entries(roles)) {
     html += `<tr><td><b style="color:var(--purple)">${esc(name)}</b></td>` +
