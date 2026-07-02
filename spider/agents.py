@@ -17,6 +17,17 @@ if TYPE_CHECKING:
 # its loop end anyway (avoids burning tokens if the model refuses to call finish).
 MAX_FINISH_NUDGES = 2
 
+# When a (non-orchestrator) agent's OUTPUT is cut off at max_tokens, we feed the model a message
+# asking it to be much more concise and retry, instead of proceeding on a truncated turn. Bounded so
+# a model that keeps overrunning can't loop forever on the same over-long answer.
+MAX_CONCISE_NUDGES = 3
+CONCISE_NUDGE = (
+    "⚠️ Your previous response was CUT OFF because it exceeded the model's maximum output length "
+    "(max_tokens). Write far fewer words: be terse, do not restate context or repeat earlier "
+    "analysis, summarise instead of quoting long tool output, and keep tool inputs minimal. "
+    "Redo that step now, much more concisely."
+)
+
 
 class Agent:
     def __init__(
@@ -54,9 +65,12 @@ class Agent:
         # "waiting_validation" until its parent accepts it (then _validated=True, status done).
         # The root (orchestrator) needs no validation. Helper agents (summarizer / tool_selector)
         # are transient internal workers — nobody ever calls `validate_agent` on them, so they must
-        # NOT require validation or they'd sit in "waiting_validation" forever.
-        self._validated = parent is None or role in ("summarizer", "tool_selector")
+        # NOT require validation or they'd sit in "waiting_validation" forever. The reporting agent
+        # is the final deliverable writer (launched by generate_report, not reviewed by a parent), so
+        # it auto-completes to `done` too instead of parking in "waiting_validation".
+        self._validated = parent is None or role in ("summarizer", "tool_selector", "reporting")
         self._finish_nudges = 0           # times we've nudged this agent to call finish
+        self._concise_nudges = 0          # times we've asked this agent to shorten an over-long answer
         self._stop = asyncio.Event()
         self.inbox: "asyncio.Queue[str]" = asyncio.Queue()
         self.is_running = False
@@ -183,6 +197,14 @@ class Agent:
         self._stop.clear()
         self._finished = False
         self._finish_nudges = 0
+        self._concise_nudges = 0
+        # A restarted (finished/stopped) agent should run on the CURRENT config, not the snapshot it
+        # was created with: refresh the session's config from disk, then rebuild this agent's own
+        # model_config (model/params/proxy) from it and drop the cached provider so it's recreated
+        # with the new settings on the next LLM call.
+        self.session.reload_config()
+        self.model_config = self.session.build_model_config(self.role)
+        self._provider = None
         # If the budget was RAISED in Settings since this agent exhausted, there are rounds to run
         # again — allow a future genuine exhaustion to summarize. If the budget is still spent,
         # keep `_exhausted` set so the loop's else-branch won't summarize this same exhaustion a
@@ -272,6 +294,26 @@ class Agent:
                     self.messages.append({"role": "assistant", "content": resp.raw_content})
                 if resp.text:
                     self._emit_message("assistant", resp.text)
+
+                # OUTPUT hit the max_tokens cap → this turn is TRUNCATED. For a sub-agent, don't
+                # proceed on a cut-off turn or run a half-written tool call: answer the model asking it
+                # to be far more concise and redo the step. The orchestrator is exempt (it may
+                # legitimately produce long plans/summaries). Bounded by MAX_CONCISE_NUDGES so a model
+                # that keeps overrunning eventually falls through to normal handling instead of looping.
+                if (resp.stop_reason == "max_tokens" and self.role != "orchestrator"
+                        and resp.raw_content and self._concise_nudges < MAX_CONCISE_NUDGES):
+                    self._concise_nudges += 1
+                    if resp.tool_calls:
+                        # raw_content carries tool_use block(s); the API requires a tool_result for
+                        # each. Reject them (don't execute a truncated call) and attach the guidance.
+                        content = [{"type": "tool_result", "tool_use_id": c["id"],
+                                    "content": CONCISE_NUDGE, "is_error": True} for c in resp.tool_calls]
+                    else:
+                        content = [{"type": "text", "text": CONCISE_NUDGE}]
+                    self.messages.append({"role": "user", "content": content})
+                    self._emit_message("user", CONCISE_NUDGE)
+                    continue
+                self._concise_nudges = 0   # a turn that fit within the output budget clears the counter
 
                 if not resp.tool_calls:
                     # The model ended a turn without calling any tool. If it already called
