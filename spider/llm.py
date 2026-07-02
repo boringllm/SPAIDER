@@ -519,7 +519,10 @@ class OpenAIProvider(BaseProvider):
                 if tc.function and tc.function.arguments:
                     slot["args"] += tc.function.arguments
             if choice.finish_reason:
-                stop_reason = "tool_use" if choice.finish_reason == "tool_calls" else "end_turn"
+                # "length" = the output hit max_tokens (truncated); surface it so the agent loop can
+                # ask the model to be more concise instead of proceeding on a cut-off turn.
+                stop_reason = {"tool_calls": "tool_use", "length": "max_tokens"}.get(
+                    choice.finish_reason, "end_turn")
 
         tool_calls: list[dict] = []
         blocks: list[dict] = []
@@ -533,7 +536,7 @@ class OpenAIProvider(BaseProvider):
             call = {"id": slot["id"] or f"call_{len(tool_calls)}", "name": slot["name"], "input": args}
             tool_calls.append(call)
             blocks.append({"type": "tool_use", **call})
-        if tool_calls:
+        if tool_calls and stop_reason != "max_tokens":
             stop_reason = "tool_use"
         return LLMResponse(
             text=text, tool_calls=tool_calls, usage=usage, stop_reason=stop_reason,
